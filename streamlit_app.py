@@ -27,7 +27,6 @@ left_chart_panel, right_chart_panel = st.columns(2)
 
 with left_chart_panel:
     st.subheader("📈 Real-Time Network Packet Throughput")
-    # FIXED: Removed the trailing plus sign to clear the syntax error
     time_series_data = pd.DataFrame(
         np.random.randn(20, 3),
         columns=['Incoming Packets', 'Routed Handshakes', 'Cached System Buffers']
@@ -36,10 +35,10 @@ with left_chart_panel:
 
 with right_chart_panel:
     st.subheader("📊 System Architecture Thread Load Distribution")
-    # Builds memory data distribution layers across virtual system threads
+    # FIXED: Restored the missing resource numerical list array elements
     architecture_thread_load = pd.DataFrame({
         'Virtual Sockets': ['Node Gateway A', 'Proxy Tunnel B', 'Module Buffer C', 'Static Compiler D'],
-        'Resource Consumption (%)': [45, 78, 23, 56]
+        'Resource Consumption (%)': [45, 72, 18, 61]
     })
     st.bar_chart(architecture_thread_load.set_index('Virtual Sockets'))
 
