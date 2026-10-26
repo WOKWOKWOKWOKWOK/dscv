@@ -1,41 +1,54 @@
-import io
-import os
-import subprocess
-import sys
-import tempfile
+import streamlit as st
 import urllib.request
 import zipfile
+import io
+import os
+import shutil
+import streamlit.components.v1 as components
 
-def run_github_zip(zip_url, main_script="__main__.py"):
-    # Create a temporary directory that self-deletes when the script ends
-    with tempfile.TemporaryDirectory() as temp_dir:
-        print(f"Downloading ZIP from {zip_url}...")
-        
+st.set_page_config(layout="wide")
+st.title("🌐 Live Non-Python Repo Host")
+
+# 1. SET THE TARGET REPOSITORY INFORMATION
+REPO_OWNER = "UtopiaUnblocker"
+REPO_NAME = "Utopia"
+BRANCH = "main" 
+
+ZIP_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/archive/refs/heads/{BRANCH}.zip"
+
+if st.button("Boot and Host Web Files"):
+    with st.spinner("Pulling files from GitHub..."):
         try:
-            # Download the ZIP file over HTTPS
-            with urllib.request.urlopen(zip_url) as response:
+            # Clean up older builds
+            if os.path.exists("hosted_site"):
+                shutil.rmtree("hosted_site")
+                
+            # Download the repo as a zip file behind the scenes
+            req = urllib.request.Request(ZIP_URL, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
                 zip_data = response.read()
+                
+            with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
+                zip_ref.extractall("hosted_site")
+            
+            # Find the folder GitHub wrapped everything inside
+            folders = os.listdir("hosted_site")
+            root_dir = os.path.join("hosted_site", folders[0])
+            
+            # Look for their main webpage file
+            html_file = os.path.join(root_dir, "index.html")
+            
+            if os.path.exists(html_file):
+                st.success("Successfully hosting repository!")
+                # Read and render the HTML directly into Streamlit
+                with open(html_file, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                
+                # Render the site (adjust height as needed)
+                components.html(html_content, height=800, scrolling=True)
+            else:
+                st.error("Could not find an index.html file in their repository.")
+                st.write("Files found inside the repo:", os.listdir(root_dir))
+                
         except Exception as e:
-            print(f"Error downloading the file: {e}")
-            return
-        
-        print("Extracting archive...")
-        # Load the ZIP from memory and extract it to the temp directory
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
-            zip_ref.extractall(temp_dir)
-        
-        # Look for the main Streamlit file
-        target_script = os.path.join(temp_dir, main_script)
-        if not os.path.exists(target_script):
-            print(f"Error: {main_script} not found in the ZIP root.")
-            return
-
-        print("Launching Streamlit...")
-        # Start Streamlit targeting the extracted file
-        subprocess.run(["streamlit", "run", target_script])
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python run_github_zip.py <github_raw_zip_url>")
-    else:
-        run_github_zip(sys.argv[1])
+            st.error(f"Error loading files: {e}")
