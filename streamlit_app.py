@@ -5,6 +5,7 @@ import urllib.request
 import sys
 import shutil
 import glob
+import random
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
@@ -78,30 +79,29 @@ export default createBareServer;
 
 auto_assemble_dependencies()
 
-# --- 3. SERVER STATE AND PORT FORCE CLEANING ---
+# --- 3. SERVER STATE CONTAINER AND RANDOMIZED PORTING ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
+if "active_port" not in st.session_state:
+    st.session_state.active_port = 8080
 
-boot_button = st.button("🚀 Boot/Force Reset Utopia Server")
+boot_button = st.button("🚀 Boot Utopia Server on Fresh Port")
 
-if boot_button:
-    # NEW: Force kill any existing Node tasks blocking our port lanes
-    with st.spinner("Clearing locked ports in container background..."):
-        try:
-            # Using Linux process killer command to wipe old hidden processes
-            subprocess.run(["pkill", "-f", "node"], check=False)
-            st.sidebar.info("Ports recycled successfully")
-        except Exception:
-            pass
-
+if boot_button or st.session_state.server_process is None:
     if st.session_state.server_process is not None:
         try:
             st.session_state.server_process.kill()
         except Exception:
             pass
         st.session_state.server_process = None
-        
-    st.info("Starting clean background server instance...")
+
+    # Roll a brand-new port number between 8000 and 9000 to completely avoid old running scripts
+    st.session_state.active_port = random.randint(8081, 8999)
+    st.info(f"Assigning isolated web port lane: {st.session_state.active_port}...")
+    
+    # Inject the randomized port directly into the container engine environment block
+    os.environ["PORT"] = str(st.session_state.active_port)
+    
     entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
     st.session_state.server_process = subprocess.Popen(
         ["node", entry_file],
@@ -128,16 +128,18 @@ if st.session_state.server_process is not None:
         if logs:
             log_placeholder.code(logs)
         else:
-            log_placeholder.code("Server container running smoothly...")
+            log_placeholder.code(f"Server is listening cleanly on port {st.session_state.active_port}...")
     except Exception as log_err:
         log_placeholder.code(f"Awaiting logs: {log_err}")
 
     # --- 5. DATA PORT PROXY AND VISUAL INTERFACE ---
     st.subheader("🌐 Utopia Web Viewport")
     try:
-        with urllib.request.urlopen("http://127.0.0.1:8080", timeout=2) as response:
+        # Pull data natively from our active, randomized local port address
+        target_url = f"http://127.0.0.1:{st.session_state.active_port}"
+        with urllib.request.urlopen(target_url, timeout=2) as response:
             server_html_content = response.read().decode('utf-8', errors='ignore')
         components.html(server_html_content, height=800, scrolling=True)
     except Exception as proxy_err:
-        st.error("⏳ Interface initializing...")
-        st.info("The port is recycled. Press the button again to synchronize the UI layer.")
+        st.error("⏳ Interface syncing...")
+        st.info("The new port lane is live. Press the launch button one more time to push the HTML data layer onto your display panel.")
