@@ -5,7 +5,7 @@ import numpy as np
 # Set the dashboard layout profile to wide mode
 st.set_page_config(layout="wide", page_title="⚡ Utopia Operations Center")
 
-# --- 1. HEADER HEADER PANEL ---
+# --- 1. HEADER PANEL ---
 st.title("⚡ Utopia Live Operations Center")
 st.markdown("---")
 
@@ -27,9 +27,9 @@ left_chart_panel, right_chart_panel = st.columns(2)
 
 with left_chart_panel:
     st.subheader("📈 Real-Time Network Packet Throughput")
-    # Generates a data grid map tracking server connections over a simulated time window
+    # FIXED: Removed the trailing plus sign to clear the syntax error
     time_series_data = pd.DataFrame(
-        np.random.randn(20, 3) +,
+        np.random.randn(20, 3),
         columns=['Incoming Packets', 'Routed Handshakes', 'Cached System Buffers']
     )
     st.line_chart(time_series_data)
@@ -39,7 +39,7 @@ with right_chart_panel:
     # Builds memory data distribution layers across virtual system threads
     architecture_thread_load = pd.DataFrame({
         'Virtual Sockets': ['Node Gateway A', 'Proxy Tunnel B', 'Module Buffer C', 'Static Compiler D'],
-        'Resource Consumption (%)': [45, 30, 15, 10]
+        'Resource Consumption (%)': [45, 78, 23, 56]
     })
     st.bar_chart(architecture_thread_load.set_index('Virtual Sockets'))
 
@@ -64,5 +64,5 @@ if st.button("⚡ Apply Environment Profiles"):
         "active_port_lane": 8296,
         "traffic_routing_policy": system_profile_mode,
         "isolated_target_path": user_input_command,
-        "security_handshake_handshake": "AES-256-GCM Verified"
+        "security_handshake": "AES-256-GCM Verified"
     })
