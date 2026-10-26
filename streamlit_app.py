@@ -79,7 +79,7 @@ export default createBareServer;
 
 auto_assemble_dependencies()
 
-# --- 3. SERVER STATE ASYNCHRONOUS STORAGE ---
+# --- 3. SERVER STATE CONTAINER ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
 if "active_port" not in st.session_state:
@@ -95,40 +95,43 @@ if boot_button:
             pass
         st.session_state.server_process = None
 
-    # Roll a clean unique port number assignment
     st.session_state.active_port = random.randint(8100, 8900)
     os.environ["PORT"] = str(st.session_state.active_port)
     
     st.info(f"Assigning stable web port lane: {st.session_state.active_port}...")
     entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
     
-    # Non-blocking flags to make sure the interface handles streams smoothly
     st.session_state.server_process = subprocess.Popen(
         ["node", entry_file],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=1,            # Line-buffered output streaming
+        bufsize=1,
         close_fds=True
     )
     st.rerun()
 
-# --- 4. ASYNCHRONOUS CONSOLE LOG MONITOR ---
+# --- 4. STREAM TRAFFIC DIRECTLY TO COMPONENT ---
 if st.session_state.server_process is not None:
     st.subheader("📋 Server Console Logs")
-    log_placeholder = st.empty()
-    log_placeholder.code(f"Utopia background process online and listening on active port {st.session_state.active_port}...")
+    st.code(f"Utopia background process online and listening on active port {st.session_state.active_port}...")
 
-    # --- 5. DATA PORT PROXY AND VISUAL INTERFACE ---
     st.subheader("🌐 Utopia Web Viewport")
+    
+    # FIXED: Python pulls the raw page data internally and strips out the broken iframe
     try:
         target_url = f"http://127.0.0.1:{st.session_state.active_port}"
-        # Direct fallback components check
-        with urllib.request.urlopen(target_url, timeout=1) as response:
-            server_html_content = response.read().decode('utf-8', errors='ignore')
-        components.html(server_html_content, height=800, scrolling=True)
-    except Exception:
-        # If the backend is running but still spinning up its internal sockets, 
-        # we display an embedded iframe proxy rather than throwing a blocking connection failure alert box.
-        iframe_proxy_html = f'<iframe src="http://127.0.0.1:{st.session_state.active_port}" width="100%" height="800px" style="border:1px solid #333; border-radius:8px;"></iframe>'
-        components.html(iframe_proxy_html, height=820, scrolling=True)
+        req = urllib.request.Request(target_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            html_raw_data = response.read().decode('utf-8', errors='ignore')
+            
+        if html_raw_data.strip():
+            # Inject the raw site layout data safely onto your active screen frame
+            components.html(html_raw_data, height=800, scrolling=True)
+        else:
+            st.info("🔄 Server is spinning up its database assets. Wait 3 seconds and click anywhere to update.")
+    except Exception as fetch_err:
+        # Direct backup rendering line if the server is processing background boot headers
+        st.warning("⚡ Loading cloud interface elements...")
+        if st.button("🔄 Click to Force Refresh View"):
+            st.rerun()
