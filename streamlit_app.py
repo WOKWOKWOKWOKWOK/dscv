@@ -40,13 +40,17 @@ except Exception as e:
     st.sidebar.error("❌ Node Engine Missing")
     st.stop()
 
+# --- NEW: File Workspace Checker ---
+st.subheader("📁 Current Workspace Files")
+st.write("Here are the exact files detected in your container:")
+st.json(os.listdir("."))
+
 if st.button("🚀 Boot Utopia Server"):
     st.info("Booting background server container...")
     try:
         # Check for your entry files
         entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
         
-        # Bypasses 'npm install' by launching your index file directly with the active node binary
         process = subprocess.Popen(
             ["node", entry_file],
             stdout=subprocess.PIPE,
@@ -66,7 +70,6 @@ if st.button("🚀 Boot Utopia Server"):
                 logs += line
                 log_placeholder.code(logs)
             
-            # Also check if it prints out errors immediately
             err_line = process.stderr.readline()
             if err_line:
                 logs += f"\nERROR: {err_line}"
