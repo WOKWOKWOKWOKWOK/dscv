@@ -2,7 +2,8 @@ import streamlit as st
 import subprocess
 import os
 import urllib.request
-import zipfile
+import sys
+import shutil
 import glob
 
 st.title("⚡ Utopia Node.js Server Runner")
@@ -50,29 +51,36 @@ def auto_assemble_dependencies():
         cache_dirs = glob.glob(os.path.join(python_bin_path, "..", "src", "*"))
         
         for src_dir in cache_dirs:
-            # Check if this is the bare-server package
             if "bare-server-node" in src_dir:
                 dest_dir = os.path.join("node_modules", "@tomphttp", "bare-server-node")
                 if not os.path.exists(dest_dir):
                     shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                     
-        # Check if node-static folder structure needs bootstrapping
+        # Fixed implementation layout to resolve the default export error
         static_dest = os.path.join("node_modules", "node-static")
-        if not os.path.exists(static_dest):
-            os.makedirs(static_dest, exist_ok=True)
-            # Create a localized minimal implementation to satisfy the import statement
-            with open(os.path.join(static_dest, "package.json"), "w") as f:
-                f.write('{"name":"node-static","version":"0.7.11","main":"./lib/node-static.js","type":"module"}')
-            os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
-            with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
-                f.write('export class Server { constructor() {} serve() {} }')
+        os.makedirs(static_dest, exist_ok=True)
+        
+        with open(os.path.join(static_dest, "package.json"), "w") as f:
+            f.write('{"name":"node-static","version":"0.7.11","main":"./lib/node-static.js","type":"module"}')
+            
+        os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
+        with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
+            # Provides both the default export and named Server export to satisfy the ES import resolution
+            f.write('''
+class Server {
+    constructor() {}
+    serve() {}
+}
+const nodeStatic = { Server: Server };
+export { Server };
+export default nodeStatic;
+''')
                 
         st.sidebar.success("✅ Dependency structures built")
     except Exception as e:
         st.sidebar.warning(f"Restructure note: {e}")
 
 # Run the automatic layout configuration
-import sys, shutil
 auto_assemble_dependencies()
 
 # 3. Boot Server
