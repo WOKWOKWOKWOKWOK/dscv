@@ -41,7 +41,7 @@ except Exception:
     st.sidebar.error("❌ Node Engine Offline")
     st.stop()
 
-# --- 2. DEPLOY DEPENDENCY MOCKUPS ---
+# --- 2. DEPLOY FUNCTIONAL DEPENDENCY MOCKUPS ---
 def auto_assemble_dependencies():
     try:
         os.makedirs("node_modules", exist_ok=True)
@@ -71,7 +71,41 @@ export default createBareServer;
             f.write('{"name":"node-static","version":"0.7.11","main":"./lib/node-static.js","type":"module"}')
         os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
         with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
-            f.write('class Server { constructor() {} serve() {} }; const nodeStatic = { Server: Server }; export { Server }; export default nodeStatic;')
+            # FIXED: Added live filesystem streaming logic directly into the node-static mockup
+            f.write('''
+import fs from 'fs';
+import path from 'path';
+
+export class Server {
+    constructor(rootPath) {
+        this.root = rootPath || '.';
+    }
+    serve(req, res) {
+        // Automatically default empty requests to the main source file
+        let targetFile = req.url === '/' ? 'index.js' : req.url;
+        let filePath = path.join(this.root, targetFile);
+        
+        fs.readFile(filePath, (err, data) => {
+            if (err) {
+                res.writeHead(404, { 'Content-Type': 'text/plain' });
+                res.end('File Not Found');
+            } else {
+                let ext = path.extname(filePath);
+                let contentType = 'text/plain';
+                if (ext === '.js' || ext === '.mjs') contentType = 'application/javascript';
+                if (ext === '.html') contentType = 'text/html';
+                if (ext === '.json') contentType = 'application/json';
+                
+                res.writeHead(200, { 'Content-Type': contentType });
+                res.end(data);
+            }
+        });
+    }
+};
+const nodeStatic = { Server: Server };
+export { Server };
+export default nodeStatic;
+''')
             
         st.sidebar.success("✅ Mock packages synced")
     except Exception as e:
@@ -111,14 +145,13 @@ if boot_button:
     )
     st.rerun()
 
-# --- 4. STREAM TRAFFIC DIRECTLY TO COMPONENT ---
+# --- 4. DATA TRAFFIC ROUTING ENGINE ---
 if st.session_state.server_process is not None:
     st.subheader("📋 Server Console Logs")
     st.code(f"Utopia background process online and listening on active port {st.session_state.active_port}...")
 
     st.subheader("🌐 Utopia Web Viewport")
     
-    # FIXED: Python pulls the raw page data internally and strips out the broken iframe
     try:
         target_url = f"http://127.0.0.1:{st.session_state.active_port}"
         req = urllib.request.Request(target_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -126,12 +159,11 @@ if st.session_state.server_process is not None:
             html_raw_data = response.read().decode('utf-8', errors='ignore')
             
         if html_raw_data.strip():
-            # Inject the raw site layout data safely onto your active screen frame
             components.html(html_raw_data, height=800, scrolling=True)
         else:
-            st.info("🔄 Server is spinning up its database assets. Wait 3 seconds and click anywhere to update.")
+            st.info("🔄 Processing background modules. Wait 3 seconds and tap force refresh.")
     except Exception as fetch_err:
-        # Direct backup rendering line if the server is processing background boot headers
         st.warning("⚡ Loading cloud interface elements...")
-        if st.button("🔄 Click to Force Refresh View"):
-            st.rerun()
+        
+    if st.button("🔄 Click to Force Refresh View"):
+        st.rerun()
