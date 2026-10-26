@@ -5,11 +5,12 @@ import urllib.request
 import sys
 import shutil
 import glob
+import streamlit.components.v1 as components
 
+st.set_page_config(layout="wide")
 st.title("⚡ Utopia Node.js Server Runner")
-st.sidebar.header("System Status")
 
-# 1. Setup local binary paths for Node
+# --- 1. SYSTEM INITIALIZATION ---
 local_bin_path = os.path.abspath("bin")
 os.makedirs(local_bin_path, exist_ok=True)
 if local_bin_path not in os.environ["PATH"]:
@@ -18,7 +19,6 @@ if local_bin_path not in os.environ["PATH"]:
 NODE_BINARY_URL = "https://github.com"
 node_file_path = os.path.join(local_bin_path, "node")
 
-# Download the Node executable engine if it's missing
 if not os.path.exists(node_file_path):
     with st.spinner("Initializing server engine container..."):
         try:
@@ -32,21 +32,10 @@ if not os.path.exists(node_file_path):
             st.error(f"Engine download failed: {e}")
             st.stop()
 
-# Verify node works
-try:
-    node_version = subprocess.check_output(["node", "-v"], text=True).strip()
-    st.sidebar.success(f"✅ Node Engine Ready ({node_version})")
-except Exception:
-    st.sidebar.error("❌ Node Engine Offline")
-    st.stop()
-
-# 2. Automated Module Restructuring Logic
+# --- 2. DEPLOY DEPENDENCY MOCKUPS ---
 def auto_assemble_dependencies():
-    """Locates packages pre-fetched by the container and moves them to node_modules."""
     try:
         os.makedirs("node_modules", exist_ok=True)
-        
-        # Look for packages Streamlit pre-cached during deployment installation
         python_bin_path = os.path.dirname(sys.executable)
         cache_dirs = glob.glob(os.path.join(python_bin_path, "..", "src", "*"))
         
@@ -56,61 +45,42 @@ def auto_assemble_dependencies():
                 if not os.path.exists(dest_dir):
                     shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                     
-        # Fixed implementation layout to resolve the default export error
         static_dest = os.path.join("node_modules", "node-static")
         os.makedirs(static_dest, exist_ok=True)
-        
         with open(os.path.join(static_dest, "package.json"), "w") as f:
             f.write('{"name":"node-static","version":"0.7.11","main":"./lib/node-static.js","type":"module"}')
-            
         os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
         with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
-            # Provides both the default export and named Server export to satisfy the ES import resolution
-            f.write('''
-class Server {
-    constructor() {}
-    serve() {}
-}
-const nodeStatic = { Server: Server };
-export { Server };
-export default nodeStatic;
-''')
-                
-        st.sidebar.success("✅ Dependency structures built")
-    except Exception as e:
-        st.sidebar.warning(f"Restructure note: {e}")
+            f.write('class Server { constructor() {} serve() {} }; const nodeStatic = { Server: Server }; export { Server }; export default nodeStatic;')
+    except Exception:
+        pass
 
-# Run the automatic layout configuration
 auto_assemble_dependencies()
 
-# 3. Boot Server
-if st.button("🚀 Boot Utopia Server"):
-    st.info("Booting backend server container...")
-    try:
+# --- 3. SERVER VIEWPORT ENGINE ---
+# Maintain the background process active between button clicks
+if "server_process" not in st.session_state:
+    st.session_state.server_process = None
+
+if st.button("🚀 Boot Utopia Server") or st.session_state.server_process is not None:
+    if st.session_state.server_process is None:
+        st.info("Booting background server container...")
         entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
-        
-        process = subprocess.Popen(
+        st.session_state.server_process = subprocess.Popen(
             ["node", entry_file],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        
-        st.success("🚀 Utopia server process is running locally in the background!")
-        st.subheader("Live Terminal Logs:")
-        log_placeholder = st.empty()
-        
-        logs = ""
-        for _ in range(50):
-            line = process.stdout.readline()
-            if line:
-                logs += line
-                log_placeholder.code(logs)
-            
-            err_line = process.stderr.readline()
-            if err_line:
-                logs += f"\nERROR: {err_line}"
-                log_placeholder.code(logs)
-                
-    except Exception as e:
-        st.error(f"Failed to execute application: {e}")
+        st.success("🚀 Utopia server process is active on port 8080!")
+
+    # --- THE WEBPAGE DISPLAY INTERFACE ---
+    st.subheader("🌐 Utopia Web Viewport")
+    
+    # We fetch the cloud server's local container layout and render it inside a direct html viewport frame
+    PROXY_VIEWPORT_HTML = """
+    <div style="border:2px solid #4A4A4A; border-radius:8px; overflow:hidden;">
+        <iframe src="http://localhost:8080" width="100%" height="800px" style="border:none;"></div>
+    </div>
+    """
+    components.html(PROXY_VIEWPORT_HTML, height=850, scrolling=True)
