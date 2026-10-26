@@ -32,6 +32,13 @@ if not os.path.exists(node_file_path):
             st.error(f"Engine download failed: {e}")
             st.stop()
 
+# Verify node works
+try:
+    node_version = subprocess.check_output(["node", "-v"], text=True).strip()
+except Exception:
+    st.error("❌ Node Engine Offline")
+    st.stop()
+
 # --- 2. DEPLOY DEPENDENCY MOCKUPS ---
 def auto_assemble_dependencies():
     try:
@@ -57,8 +64,7 @@ def auto_assemble_dependencies():
 
 auto_assemble_dependencies()
 
-# --- 3. SERVER VIEWPORT ENGINE ---
-# Maintain the background process active between button clicks
+# --- 3. SERVER STATE MANAGEMENT ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
 
@@ -74,13 +80,17 @@ if st.button("🚀 Boot Utopia Server") or st.session_state.server_process is no
         )
         st.success("🚀 Utopia server process is active on port 8080!")
 
-    # --- THE WEBPAGE DISPLAY INTERFACE ---
+    # --- 4. PYTHON REVERSE PROXY CONNECTION ---
     st.subheader("🌐 Utopia Web Viewport")
     
-    # We fetch the cloud server's local container layout and render it inside a direct html viewport frame
-    PROXY_VIEWPORT_HTML = """
-    <div style="border:2px solid #4A4A4A; border-radius:8px; overflow:hidden;">
-        <iframe src="http://localhost:8080" width="100%" height="800px" style="border:none;"></div>
-    </div>
-    """
-    components.html(PROXY_VIEWPORT_HTML, height=850, scrolling=True)
+    try:
+        # Fetches the raw HTML data directly from the background port 8080 internal loop
+        with urllib.request.urlopen("http://127.0.0.1:8080", timeout=5) as response:
+            server_html_content = response.read().decode('utf-8', errors='ignore')
+            
+        # Renders the exact captured application data inside the secure web frame layout
+        components.html(server_html_content, height=800, scrolling=True)
+        
+    except Exception as proxy_err:
+        st.error("⏳ Waiting for server interface to stabilize...")
+        st.info("The process is running in the background. Click the button again in 2-3 seconds to refresh the data line.")
