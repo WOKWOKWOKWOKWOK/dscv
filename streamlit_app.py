@@ -7,21 +7,21 @@ import subprocess
 import sys
 import shutil
 
-st.title("⚡ Node.js App Runner inside Streamlit")
+st.title("⚡ Utopia Node.js Server Runner")
 
-# 1. SET THE TARGET REPOSITORY DETAILS HERE
-REPO_OWNER = "UtopiaUnblocker"
-REPO_NAME = "Utopia"
-BRANCH = "main"
+# 1. ENTER YOUR DETAILS HERE
+REPO_OWNER = "UtopiaUnblocker"  # Replace with the actual repository owner name
+REPO_NAME = "Utopia"    # Replace with the actual repository name
+BRANCH = "main"            # Usually 'main' or 'master'
 
-ZIP_URL = f"https://github.com{REPO_OWNER}/{REPO_NAME}/archive/refs/heads/{BRANCH}.zip"
+# 2. This line automatically constructs the secret GitHub background ZIP link
+ZIP_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/archive/refs/heads/{BRANCH}.zip"
 
-# Status trackers in Streamlit sidebar
 st.sidebar.header("System Status")
 
-if st.button("Download and Start Node.js Application"):
-    # Step 1: Clean and download the repository code
-    with st.spinner("Downloading repository source from GitHub..."):
+if st.button("🚀 Boot Utopia Server"):
+    # Step 1: Download code from GitHub via the dynamic link
+    with st.spinner("Downloading code files from GitHub..."):
         if os.path.exists("node_app"):
             shutil.rmtree("node_app")
             
@@ -33,18 +33,18 @@ if st.button("Download and Start Node.js Application"):
             with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
                 zip_ref.extractall("node_app")
                 
-            # Handle the nested root directory GitHub creates
+            # Find the nested main folder that GitHub auto-creates inside the ZIP
             nested_folder = os.listdir("node_app")[0]
             app_path = os.path.abspath(os.path.join("node_app", nested_folder))
             st.sidebar.success("✅ Code downloaded")
         except Exception as e:
-            st.error(f"Failed to fetch code: {e}")
+            st.error(f"Failed to fetch code from GitHub: {e}")
+            st.info("Check that REPO_OWNER and REPO_NAME are spelled exactly right.")
             st.stop()
 
-    # Step 2: Install Node.js directly inside the Streamlit environment
-    with st.spinner("Installing Node.js environment..."):
+    # Step 2: Extract a portable Node.js runtime inside the container
+    with st.spinner("Setting up Node.js engine..."):
         try:
-            # Streamlit Cloud runs on Linux (Ubuntu), so we download a portable Node.js binary package
             NODE_VERSION = "v20.11.0"
             NODE_URL = f"https://nodejs.org{NODE_VERSION}/node-{NODE_VERSION}-linux-x64.tar.xz"
             
@@ -56,39 +56,34 @@ if st.button("Download and Start Node.js Application"):
                 with open("node.tar.xz", "wb") as f:
                     f.write(node_tar_data)
                 
-                # Unpack the portable Node binary package
                 os.makedirs("node_runtime", exist_ok=True)
                 subprocess.run(["tar", "-xf", "node.tar.xz", "-C", "node_runtime"], check=True)
                 os.remove("node.tar.xz")
             
-            # Find the path to the newly extracted node & npm binaries
             runtime_folder = os.listdir("node_runtime")[0]
             node_bin_dir = os.path.abspath(os.path.join("node_runtime", runtime_folder, "bin"))
             
-            # Update the environment path so Python can find 'node' and 'npm'
             os.environ["PATH"] = f"{node_bin_dir}:{os.environ['PATH']}"
             st.sidebar.success("✅ Node.js Engine Ready")
         except Exception as e:
             st.error(f"Failed to install Node.js engine: {e}")
             st.stop()
 
-    # Step 3: Install the application's dependencies (npm install)
-    with st.spinner("Installing Node.js dependencies (npm install)..."):
+    # Step 3: Read package.json and download modules
+    with st.spinner("Running npm install..."):
         try:
-            # Run npm install inside the target app folder
             subprocess.run(["npm", "install"], cwd=app_path, check=True)
             st.sidebar.success("✅ Dependencies installed")
         except Exception as e:
             st.error(f"Failed to run npm install: {e}")
             st.stop()
 
-    # Step 4: Run the application
-    st.info("Starting the background app container...")
+    # Step 4: Run the Utopia server file
+    st.info("Booting background server container...")
     try:
-        # Check if entry point is index.js or index.mjs
+        # Check if the main file is index.js or index.mjs based on your folder image
         entry_file = "index.js" if os.path.exists(os.path.join(app_path, "index.js")) else "index.mjs"
         
-        # Launch the Node app as a background process so Streamlit doesn't freeze
         process = subprocess.Popen(
             ["node", entry_file],
             cwd=app_path,
@@ -97,20 +92,18 @@ if st.button("Download and Start Node.js Application"):
             text=True
         )
         
-        st.success(f"🚀 Node.js process started successfully using {entry_file}!")
-        st.warning("Keep this Streamlit page open to keep the backend script running.")
+        st.success("🚀 Utopia server process is running in the background!")
         
-        # Stream the initial terminal output log straight into the interface
-        st.subheader("Console Output Logs:")
+        st.subheader("Live Terminal Logs:")
         log_placeholder = st.empty()
         
-        # Read the first few lines of logs to ensure it booted correctly
         logs = ""
-        for _ in range(15):
+        # Let's read out the logs to confirm the server booted successfully
+        for _ in range(20):
             line = process.stdout.readline()
             if line:
                 logs += line
                 log_placeholder.code(logs)
                 
     except Exception as e:
-        st.error(f"Failed to execute backend application: {e}")
+        st.error(f"Failed to execute application: {e}")
