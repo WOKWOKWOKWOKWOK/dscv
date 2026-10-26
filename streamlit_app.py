@@ -32,13 +32,6 @@ if not os.path.exists(node_file_path):
             st.error(f"Engine download failed: {e}")
             st.stop()
 
-# Verify node works
-try:
-    node_version = subprocess.check_output(["node", "-v"], text=True).strip()
-except Exception:
-    st.error("❌ Node Engine Offline")
-    st.stop()
-
 # --- 2. DEPLOY DEPENDENCY MOCKUPS ---
 def auto_assemble_dependencies():
     try:
@@ -67,30 +60,71 @@ auto_assemble_dependencies()
 # --- 3. SERVER STATE MANAGEMENT ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
+if "server_logs" not in st.session_state:
+    st.session_state.server_logs = ""
 
 if st.button("🚀 Boot Utopia Server") or st.session_state.server_process is not None:
     if st.session_state.server_process is None:
         st.info("Booting background server container...")
         entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
+        
+        # Start the process and route output logs so Python can read them
         st.session_state.server_process = subprocess.Popen(
             ["node", entry_file],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        st.success("🚀 Utopia server process is active on port 8080!")
+        st.success("🚀 Utopia server process triggered!")
+
+    # Check for new logs from the server process
+    try:
+        # Read available lines from stdout without blocking
+        import select
+        process = st.session_state.server_process
+        
+        # Read stdout logs
+        while rlist := select.select([process.stdout], [], [], 0.1)[0]:
+            line = process.stdout.readline()
+            if not line:
+                break
+            st.session_state.server_logs += line
+
+        # Read stderr logs (errors)
+        while rlist := select.select([process.stderr], [], [], 0.1)[0]:
+            line = process.stderr.readline()
+            if not line:
+                break
+            st.session_state.server_logs += f"ERROR: {line}"
+    except Exception as log_err:
+        pass
+
+    # Display the logs on the page so we can see what the server is doing
+    st.subheader("📋 Server Console Logs")
+    if st.session_state.server_logs:
+        st.code(st.session_state.server_logs)
+    else:
+        st.write("No log output generated yet. Click the button again to refresh logs.")
 
     # --- 4. PYTHON REVERSE PROXY CONNECTION ---
     st.subheader("🌐 Utopia Web Viewport")
     
-    try:
-        # Fetches the raw HTML data directly from the background port 8080 internal loop
-        with urllib.request.urlopen("http://127.0.0.1:8080", timeout=5) as response:
-            server_html_content = response.read().decode('utf-8', errors='ignore')
+    # Try multiple common ports to check where it's listening
+    ports_to_try = [8080, 8000, 3000, 5000]
+    connected = False
+    
+    for port in ports_to_try:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=2) as response:
+                server_html_content = response.read().decode('utf-8', errors='ignore')
             
-        # Renders the exact captured application data inside the secure web frame layout
-        components.html(server_html_content, height=800, scrolling=True)
-        
-    except Exception as proxy_err:
+            st.success(f"Connected successfully on port {port}!")
+            components.html(server_html_content, height=800, scrolling=True)
+            connected = True
+            break
+        except Exception:
+            continue
+            
+    if not connected:
         st.error("⏳ Waiting for server interface to stabilize...")
-        st.info("The process is running in the background. Click the button again in 2-3 seconds to refresh the data line.")
+        st.info("Review the Server Console Logs above to check for errors or to see if a custom port is required.")
