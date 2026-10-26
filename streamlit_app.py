@@ -9,7 +9,7 @@ import random
 import fcntl
 
 st.set_page_config(layout="wide")
-st.title("⚡ Utopia Node.js Server Runner")
+st.title("⚡ Utopia Node.js Server Controller")
 st.sidebar.header("System Status")
 
 # --- 1. SYSTEM INITIALIZATION ---
@@ -71,7 +71,6 @@ export default createBareServer;
             f.write('{"name":"node-static","version":"0.7.11","main":"./lib/node-static.js","type":"module"}')
         os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
         with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
-            # FIXED: Rewritten modular block structure to eliminate duplicate export lines completely
             f.write('''
 export class Server { 
     constructor() {} 
@@ -126,7 +125,7 @@ if boot_button:
         
     st.rerun()
 
-# --- 4. REAL-TIME TERMINAL DISPLAY LAYER ---
+# --- 4. REAL-TIME TERMINAL LOG COMPONENT ---
 if st.session_state.server_process is not None:
     st.subheader("🖥️ Utopia Live Server Console")
     
@@ -145,6 +144,39 @@ if st.session_state.server_process is not None:
         pass
 
     st.code(st.session_state.terminal_logs, language="bash")
+
+    # --- 5. NEW: INTERACTIVE API TEST CONTROL PANEL ---
+    st.subheader("🛠️ Live Interactive Request Tester")
+    st.write("Since this server acts as an invisible backend API proxy, use the tools below to interact with it natively:")
     
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        test_route = st.text_input("Target Request Endpoint Pathway:", value="/bare/")
+    with col2:
+        test_method = st.selectbox("HTTP Action:", ["GET", "POST", "OPTIONS"])
+        
+    if st.button("📡 Transmit Request to Server"):
+        server_address = f"http://127.0.0.1:{st.session_state.active_port}{test_route}"
+        st.info(f"Piping outbound {test_method} data handshake stream directly into internal route: `{server_address}`...")
+        
+        try:
+            req = urllib.request.Request(server_address, method=test_method, headers={'User-Agent': 'Mozilla/5.0 Streamlit Testing'})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                status_code = resp.getcode()
+                response_headers = dict(resp.info())
+                response_body = resp.read().decode('utf-8', errors='ignore')
+                
+            st.success(f"✅ Handshake Complete! Server Response Code: {status_code}")
+            
+            st.markdown("**Server Header Meta Response:**")
+            st.json(response_headers)
+            
+            if response_body:
+                st.markdown("**Server Data Payload Output:**")
+                st.code(response_body)
+        except Exception as conn_err:
+            st.warning(f"Connection feedback captured: {conn_err}")
+            st.info("This is typical behavior for proxy gateways processing custom routes without active clients.")
+            
     if st.button("🔄 Sync Live Stream Outputs"):
         st.rerun()
