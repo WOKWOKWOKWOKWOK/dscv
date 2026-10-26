@@ -2,6 +2,7 @@ import streamlit as st
 import subprocess
 import os
 import urllib.request
+import shutil
 
 st.title("⚡ Utopia Node.js Server Runner")
 st.sidebar.header("System Status")
@@ -41,20 +42,29 @@ except Exception as e:
     st.stop()
 
 if st.button("🚀 Boot Utopia Server"):
-    # NEW: Uses Node's internal npx executor to download missing dependency modules automatically
-    with st.spinner("Downloading required server packages..."):
+    # Injecting the missing package files manually into the environment
+    with st.spinner("Re-linking missing dependency modules..."):
         try:
-            st.info("Installing module dependencies via internal wrapper...")
-            # We use npx to run npm commands directly through the node engine binary
-            subprocess.run(["node", os.path.join(os.path.dirname(node_file_path), "node"), "-e", 
-                            "import('child_process').then(cp => cp.execSync('npx --yes production', {stdio: 'inherit'}))"], 
-                           shell=True)
+            # Recreate node_modules directory structure manually
+            target_pkg_dir = os.path.join("node_modules", "@tomphttp", "bare-server-node")
+            os.makedirs(target_pkg_dir, exist_ok=True)
             
-            # Direct fallback target installation for the specific crashing module
-            subprocess.run(["node", "-e", "require('child_process').execSync('npm install @tomphttp/bare-server-node')"], check=False)
+            # Direct source URLs for the files inside the missing package repository
+            base_url = "https://githubusercontent.com"
+            files_to_get = ["package.json", "index.js"]
+            
+            for file_name in files_to_get:
+                file_dest = os.path.join(target_pkg_dir, file_name)
+                if not os.path.exists(file_dest):
+                    req = urllib.request.Request(base_url + file_name, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req) as response:
+                        content = response.read()
+                    with open(file_dest, "wb") as f:
+                        f.write(content)
+                        
             st.sidebar.success("✅ Module packages linked")
         except Exception as e:
-            st.warning(f"Internal wrapper notice: {e}. Attempting direct boot...")
+            st.warning(f"Dependency injection note: {e}")
 
     st.info("Booting background server container...")
     try:
