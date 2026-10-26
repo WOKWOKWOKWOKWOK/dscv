@@ -71,7 +71,15 @@ export default createBareServer;
             f.write('{"name":"node-static","version":"0.7.11","main":"./lib/node-static.js","type":"module"}')
         os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
         with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
-            f.write('class Server { constructor() {} serve() {} }; const nodeStatic = { Server: Server }; export { Server }; export default nodeStatic;')
+            # FIXED: Rewritten modular block structure to eliminate duplicate export lines completely
+            f.write('''
+export class Server { 
+    constructor() {} 
+    serve() {} 
+}
+const nodeStatic = { Server: Server };
+export default nodeStatic;
+''')
             
         st.sidebar.success("✅ Mock packages synced")
     except Exception as e:
@@ -111,7 +119,6 @@ if boot_button:
         bufsize=1
     )
     
-    # Configure the background streams to be non-blocking so they never freeze the page layout
     for stream in [st.session_state.server_process.stdout, st.session_state.server_process.stderr]:
         fd = stream.fileno()
         fl = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -123,7 +130,6 @@ if boot_button:
 if st.session_state.server_process is not None:
     st.subheader("🖥️ Utopia Live Server Console")
     
-    # Scan standard pipe vectors for runtime feedback strings
     try:
         stdout_data = st.session_state.server_process.stdout.read()
         if stdout_data:
@@ -138,9 +144,7 @@ if st.session_state.server_process is not None:
     except Exception:
         pass
 
-    # Print the aggregated terminal text straight out to the container panel layout
     st.code(st.session_state.terminal_logs, language="bash")
     
-    # Auto refresh trigger button
     if st.button("🔄 Sync Live Stream Outputs"):
         st.rerun()
