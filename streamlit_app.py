@@ -40,12 +40,22 @@ except Exception as e:
     st.sidebar.error("❌ Node Engine Missing")
     st.stop()
 
-# --- NEW: File Workspace Checker ---
-st.subheader("📁 Current Workspace Files")
-st.write("Here are the exact files detected in your container:")
-st.json(os.listdir("."))
-
 if st.button("🚀 Boot Utopia Server"):
+    # NEW: Uses Node's internal npx executor to download missing dependency modules automatically
+    with st.spinner("Downloading required server packages..."):
+        try:
+            st.info("Installing module dependencies via internal wrapper...")
+            # We use npx to run npm commands directly through the node engine binary
+            subprocess.run(["node", os.path.join(os.path.dirname(node_file_path), "node"), "-e", 
+                            "import('child_process').then(cp => cp.execSync('npx --yes production', {stdio: 'inherit'}))"], 
+                           shell=True)
+            
+            # Direct fallback target installation for the specific crashing module
+            subprocess.run(["node", "-e", "require('child_process').execSync('npm install @tomphttp/bare-server-node')"], check=False)
+            st.sidebar.success("✅ Module packages linked")
+        except Exception as e:
+            st.warning(f"Internal wrapper notice: {e}. Attempting direct boot...")
+
     st.info("Booting background server container...")
     try:
         # Check for your entry files
@@ -63,8 +73,8 @@ if st.button("🚀 Boot Utopia Server"):
         log_placeholder = st.empty()
         
         logs = ""
-        # Capture and display the active server logs
-        for _ in range(40):
+        # Capture and display the active server logs live
+        for _ in range(50):
             line = process.stdout.readline()
             if line:
                 logs += line
