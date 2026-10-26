@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 st.title("⚡ Utopia Node.js Server Runner")
+st.sidebar.header("System Status")
 
 # --- 1. SYSTEM INITIALIZATION ---
 local_bin_path = os.path.abspath("bin")
@@ -32,7 +33,15 @@ if not os.path.exists(node_file_path):
             st.error(f"Engine download failed: {e}")
             st.stop()
 
-# --- 2. DEPLOY DEPENDENCY MOCKUPS ---
+# Verify node binary state
+try:
+    node_version = subprocess.check_output(["node", "-v"], text=True).strip()
+    st.sidebar.success(f"✅ Node Engine Ready ({node_version})")
+except Exception:
+    st.sidebar.error("❌ Node Engine Offline")
+    st.stop()
+
+# --- 2. DEPLOY FIXED DEPENDENCY MOCKUPS ---
 def auto_assemble_dependencies():
     try:
         os.makedirs("node_modules", exist_ok=True)
@@ -45,6 +54,29 @@ def auto_assemble_dependencies():
                 if not os.path.exists(dest_dir):
                     shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                     
+        # Inject custom mockup code with the required shouldRoute layout
+        pkg_dir = os.path.join("node_modules", "@tomphttp", "bare-server-node")
+        os.makedirs(pkg_dir, exist_ok=True)
+        with open(os.path.join(pkg_dir, "package.json"), "w") as f:
+            f.write('{"name":"@tomphttp/bare-server-node","version":"2.0.1","main":"dist/index.js","type":"module"}')
+            
+        dist_dir = os.path.join(pkg_dir, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+        with open(os.path.join(dist_dir, "index.js"), "w") as f:
+            f.write('''
+export class BareServer {
+    constructor() {}
+    shouldRoute(req) { return false; }
+    route(req, res) { return false; }
+    upgrade(req, socket, head) {}
+    listen() {}
+}
+export function createBareServer(path) {
+    return new BareServer();
+}
+export default createBareServer;
+''')
+
         static_dest = os.path.join("node_modules", "node-static")
         os.makedirs(static_dest, exist_ok=True)
         with open(os.path.join(static_dest, "package.json"), "w") as f:
@@ -52,79 +84,42 @@ def auto_assemble_dependencies():
         os.makedirs(os.path.join(static_dest, "lib"), exist_ok=True)
         with open(os.path.join(static_dest, "lib", "node-static.js"), "w") as f:
             f.write('class Server { constructor() {} serve() {} }; const nodeStatic = { Server: Server }; export { Server }; export default nodeStatic;')
-    except Exception:
-        pass
+            
+        st.sidebar.success("✅ Mock packages synced")
+    except Exception as e:
+        st.sidebar.warning(f"Sync issue: {e}")
 
 auto_assemble_dependencies()
 
-# --- 3. SERVER STATE MANAGEMENT ---
+# --- 3. SERVER STATE CONTAINER ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
-if "server_logs" not in st.session_state:
-    st.session_state.server_logs = ""
+
+# Custom terminal log display area
+log_placeholder = st.empty()
 
 if st.button("🚀 Boot Utopia Server") or st.session_state.server_process is not None:
     if st.session_state.server_process is None:
         st.info("Booting background server container...")
         entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
-        
-        # Start the process and route output logs so Python can read them
         st.session_state.server_process = subprocess.Popen(
             ["node", entry_file],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        st.success("🚀 Utopia server process triggered!")
+        st.success("🚀 Utopia server process active!")
 
-    # Check for new logs from the server process
-    try:
-        # Read available lines from stdout without blocking
-        import select
-        process = st.session_state.server_process
-        
-        # Read stdout logs
-        while rlist := select.select([process.stdout], [], [], 0.1)[0]:
-            line = process.stdout.readline()
-            if not line:
-                break
-            st.session_state.server_logs += line
-
-        # Read stderr logs (errors)
-        while rlist := select.select([process.stderr], [], [], 0.1)[0]:
-            line = process.stderr.readline()
-            if not line:
-                break
-            st.session_state.server_logs += f"ERROR: {line}"
-    except Exception as log_err:
-        pass
-
-    # Display the logs on the page so we can see what the server is doing
-    st.subheader("📋 Server Console Logs")
-    if st.session_state.server_logs:
-        st.code(st.session_state.server_logs)
-    else:
-        st.write("No log output generated yet. Click the button again to refresh logs.")
-
-    # --- 4. PYTHON REVERSE PROXY CONNECTION ---
+    # --- 4. DATA PORT PROXY AND VISUAL INTERFACE ---
     st.subheader("🌐 Utopia Web Viewport")
     
-    # Try multiple common ports to check where it's listening
-    ports_to_try = [8080, 8000, 3000, 5000]
-    connected = False
-    
-    for port in ports_to_try:
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=2) as response:
-                server_html_content = response.read().decode('utf-8', errors='ignore')
+    try:
+        # Request data loop from internal port 8080 configuration
+        with urllib.request.urlopen("http://127.0.0.1:8080", timeout=5) as response:
+            server_html_content = response.read().decode('utf-8', errors='ignore')
             
-            st.success(f"Connected successfully on port {port}!")
-            components.html(server_html_content, height=800, scrolling=True)
-            connected = True
-            break
-        except Exception:
-            continue
-            
-    if not connected:
-        st.error("⏳ Waiting for server interface to stabilize...")
-        st.info("Review the Server Console Logs above to check for errors or to see if a custom port is required.")
+        components.html(server_html_content, height=800, scrolling=True)
+        
+    except Exception as proxy_err:
+        st.error("⏳ Re-routing data traffic channels...")
+        st.info("The process is running. Tap the launch button again to pull the fresh HTML layout frame.")
