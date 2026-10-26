@@ -6,6 +6,7 @@ import sys
 import shutil
 import glob
 import random
+import time
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
@@ -79,36 +80,47 @@ export default createBareServer;
 
 auto_assemble_dependencies()
 
-# --- 3. SERVER STATE CONTAINER AND RANDOMIZED PORTING ---
+# --- 3. SERVER STATE AND LOCK ENGINE ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
 if "active_port" not in st.session_state:
     st.session_state.active_port = 8080
+if "is_booting" not in st.session_state:
+    st.session_state.is_booting = False
 
-boot_button = st.button("🚀 Boot Utopia Server on Fresh Port")
+# The button locks automatically if clicked to prevent flooding the server ports
+boot_button = st.button("🚀 Boot Utopia Server", disabled=st.session_state.is_booting)
 
-if boot_button or st.session_state.server_process is None:
+if boot_button:
+    st.session_state.is_booting = True
+    
+    # Kill old processes if they exist safely
     if st.session_state.server_process is not None:
         try:
-            st.session_state.server_process.kill()
+            st.session_state.server_process.terminate()
+            st.session_state.server_process.wait(timeout=2)
         except Exception:
             pass
         st.session_state.server_process = None
 
-    # Roll a brand-new port number between 8000 and 9000 to completely avoid old running scripts
-    st.session_state.active_port = random.randint(8081, 8999)
-    st.info(f"Assigning isolated web port lane: {st.session_state.active_port}...")
-    
-    # Inject the randomized port directly into the container engine environment block
+    # Roll a clean unique port number
+    st.session_state.active_port = random.randint(8100, 8900)
     os.environ["PORT"] = str(st.session_state.active_port)
     
+    st.info(f"Assigning stable web port lane: {st.session_state.active_port}...")
     entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
+    
     st.session_state.server_process = subprocess.Popen(
         ["node", entry_file],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
     )
+    
+    # Short pause to let the network channel open cleanly
+    time.sleep(2)
+    st.session_state.is_booting = False
+    st.rerun()
 
 # --- 4. LIVE CONSOLE LOG MONITOR ---
 if st.session_state.server_process is not None:
@@ -117,7 +129,8 @@ if st.session_state.server_process is not None:
     
     logs = ""
     try:
-        for _ in range(15):
+        # Check standard out streams non-blocking
+        for _ in range(10):
             line = st.session_state.server_process.stdout.readline()
             if line:
                 logs += f"LOG: {line}"
@@ -128,18 +141,17 @@ if st.session_state.server_process is not None:
         if logs:
             log_placeholder.code(logs)
         else:
-            log_placeholder.code(f"Server is listening cleanly on port {st.session_state.active_port}...")
+            log_placeholder.code(f"Utopia backend online and listening on port {st.session_state.active_port}...")
     except Exception as log_err:
         log_placeholder.code(f"Awaiting logs: {log_err}")
 
     # --- 5. DATA PORT PROXY AND VISUAL INTERFACE ---
     st.subheader("🌐 Utopia Web Viewport")
     try:
-        # Pull data natively from our active, randomized local port address
         target_url = f"http://127.0.0.1:{st.session_state.active_port}"
-        with urllib.request.urlopen(target_url, timeout=2) as response:
+        with urllib.request.urlopen(target_url, timeout=3) as response:
             server_html_content = response.read().decode('utf-8', errors='ignore')
         components.html(server_html_content, height=800, scrolling=True)
     except Exception as proxy_err:
-        st.error("⏳ Interface syncing...")
-        st.info("The new port lane is live. Press the launch button one more time to push the HTML data layer onto your display panel.")
+        st.warning("⏳ Synchronizing web connection layout...")
+        st.info("The application environment is running. Click anywhere or wait for the interface to load.")
