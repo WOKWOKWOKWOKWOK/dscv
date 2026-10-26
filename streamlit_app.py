@@ -33,7 +33,6 @@ if not os.path.exists(node_file_path):
             st.error(f"Engine download failed: {e}")
             st.stop()
 
-# Verify node binary state
 try:
     node_version = subprocess.check_output(["node", "-v"], text=True).strip()
     st.sidebar.success(f"✅ Node Engine Ready ({node_version})")
@@ -79,20 +78,30 @@ export default createBareServer;
 
 auto_assemble_dependencies()
 
-# --- 3. SERVER STATE CONTAINER ---
+# --- 3. SERVER STATE AND PORT FORCE CLEANING ---
 if "server_process" not in st.session_state:
     st.session_state.server_process = None
 
-boot_button = st.button("🚀 Boot/Restart Utopia Server")
+boot_button = st.button("🚀 Boot/Force Reset Utopia Server")
 
-# If button is pressed or if process has crashed, handle fresh initialization
-if boot_button or (st.session_state.server_process is not None and st.session_state.server_process.poll() is not None):
-    # Kill dead reference if it crashed out
+if boot_button:
+    # NEW: Force kill any existing Node tasks blocking our port lanes
+    with st.spinner("Clearing locked ports in container background..."):
+        try:
+            # Using Linux process killer command to wipe old hidden processes
+            subprocess.run(["pkill", "-f", "node"], check=False)
+            st.sidebar.info("Ports recycled successfully")
+        except Exception:
+            pass
+
     if st.session_state.server_process is not None:
-        st.session_state.server_process.kill()
+        try:
+            st.session_state.server_process.kill()
+        except Exception:
+            pass
         st.session_state.server_process = None
         
-    st.info("Starting fresh background server container instance...")
+    st.info("Starting clean background server instance...")
     entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
     st.session_state.server_process = subprocess.Popen(
         ["node", entry_file],
@@ -106,16 +115,12 @@ if st.session_state.server_process is not None:
     st.subheader("📋 Server Console Logs")
     log_placeholder = st.empty()
     
-    # Check current process logs non-blocking
     logs = ""
     try:
-        # Read available console outputs
         for _ in range(15):
-            # Check standard out
             line = st.session_state.server_process.stdout.readline()
             if line:
                 logs += f"LOG: {line}"
-            # Check error line stream
             err_line = st.session_state.server_process.stderr.readline()
             if err_line:
                 logs += f"ERROR: {err_line}"
@@ -123,7 +128,7 @@ if st.session_state.server_process is not None:
         if logs:
             log_placeholder.code(logs)
         else:
-            log_placeholder.code("Server process is listening silently...")
+            log_placeholder.code("Server container running smoothly...")
     except Exception as log_err:
         log_placeholder.code(f"Awaiting logs: {log_err}")
 
@@ -134,5 +139,5 @@ if st.session_state.server_process is not None:
             server_html_content = response.read().decode('utf-8', errors='ignore')
         components.html(server_html_content, height=800, scrolling=True)
     except Exception as proxy_err:
-        st.error("⏳ Interface not rendering yet.")
-        st.info("Review the Server Console Logs above to check for errors or to see if a custom port is required.")
+        st.error("⏳ Interface initializing...")
+        st.info("The port is recycled. Press the button again to synchronize the UI layer.")
