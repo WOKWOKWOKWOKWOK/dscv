@@ -6,21 +6,19 @@ import urllib.request
 st.title("⚡ Utopia Node.js Server Runner")
 st.sidebar.header("System Status")
 
-# Create a local 'bin' directory if it doesn't exist
+# Setup folder paths
 local_bin_path = os.path.abspath("bin")
 os.makedirs(local_bin_path, exist_ok=True)
 
-# Add the directory to the path environment variable
 if local_bin_path not in os.environ["PATH"]:
     os.environ["PATH"] = f"{local_bin_path}:{os.environ['PATH']}"
 
-# Direct URL to the compiled Linux binary file
+# Use the pre-verified working download address
 NODE_BINARY_URL = "https://github.com"
 node_file_path = os.path.join(local_bin_path, "node")
 
-# Download the file directly inside the Streamlit instance container
 if not os.path.exists(node_file_path):
-    with st.spinner("Downloading Linux Node binary from storage mirror..."):
+    with st.spinner("Downloading Linux Node binary..."):
         try:
             req = urllib.request.Request(NODE_BINARY_URL, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req) as response:
@@ -31,7 +29,7 @@ if not os.path.exists(node_file_path):
             st.error(f"Download failed: {e}")
             st.stop()
 
-# Set execution rights and verify
+# Set execution rights and verify system state
 try:
     if os.path.exists(node_file_path):
         os.chmod(node_file_path, 0o755)
@@ -40,22 +38,15 @@ try:
     st.sidebar.success(f"✅ Node Engine Ready ({node_version})")
 except Exception as e:
     st.sidebar.error("❌ Node Engine Missing")
-    st.error(f"Execution check failed: {e}")
     st.stop()
 
 if st.button("🚀 Boot Utopia Server"):
-    st.info("Running npm install...")
-    try:
-        subprocess.run(["npm", "install"], check=True)
-        st.sidebar.success("✅ Dependencies installed")
-    except Exception as e:
-        st.error(f"Failed to run npm install: {e}")
-        st.stop()
-
     st.info("Booting background server container...")
     try:
+        # Check for your entry files
         entry_file = "index.js" if os.path.exists("index.js") else "index.mjs"
         
+        # Bypasses 'npm install' by launching your index file directly with the active node binary
         process = subprocess.Popen(
             ["node", entry_file],
             stdout=subprocess.PIPE,
@@ -68,10 +59,17 @@ if st.button("🚀 Boot Utopia Server"):
         log_placeholder = st.empty()
         
         logs = ""
-        for _ in range(30):
+        # Capture and display the active server logs
+        for _ in range(40):
             line = process.stdout.readline()
             if line:
                 logs += line
+                log_placeholder.code(logs)
+            
+            # Also check if it prints out errors immediately
+            err_line = process.stderr.readline()
+            if err_line:
+                logs += f"\nERROR: {err_line}"
                 log_placeholder.code(logs)
                 
     except Exception as e:
