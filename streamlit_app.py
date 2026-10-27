@@ -4,14 +4,12 @@ import urllib.parse
 from PIL import Image
 import streamlit as st
 from streamlit_image_coordinates import streamlit_image_coordinates
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.keys import Keys
+from playwright.sync_api import sync_playwright
 
 # -------------------------------------------------------------------
-# Page Config & Custom Styling
+# Page Config & Layout
 # -------------------------------------------------------------------
-st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
+st.set_page_config(page_title="Playwright Browser", page_icon="🌐", layout="wide")
 
 st.markdown(
     """
@@ -48,63 +46,40 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# Ultra-Fast Driver Initialization with CDP Blocking
+# Fast Playwright Engine Setup
 # -------------------------------------------------------------------
 @st.cache_resource
-def get_driver():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    
-    # 1024x576 resolution significantly speeds up screenshot encoding vs 1280x720
-    options.add_argument("--window-size=1024,576")
+def get_browser_context():
+    p = sync_playwright().start()
 
-    # Aggressive execution and memory optimization flags
-    options.page_load_strategy = "eager"
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-component-update")
-    options.add_argument("--disable-background-networking")
-    options.add_argument("--disable-domain-reliability")
-    options.add_argument("--disable-sync")
-    options.add_argument("--metrics-recording-only")
-    options.add_argument("--disable-default-apps")
-    options.add_argument("--mute-audio")
-    options.add_argument("--no-first-run")
-    options.add_argument("--disable-notifications")
-    options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    # Use Linux system Chromium installed via packages.txt
+    binary_path = "/usr/bin/chromium"
+    if not os.path.exists(binary_path):
+        binary_path = "/usr/bin/chromium-browser"
+
+    browser = p.chromium.launch(
+        executable_path=binary_path if os.path.exists(binary_path) else None,
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--window-size=1024,576",
+        ],
     )
 
-    for binary_path in ["/usr/bin/chromium", "/usr/bin/chromium-browser"]:
-        if os.path.exists(binary_path):
-            options.binary_location = binary_path
-            break
+    context = browser.new_context(viewport={"width": 1024, "height": 576})
+    page = context.new_page()
 
-    driver = webdriver.Chrome(options=options)
-    driver.implicitly_wait(0.2)
-
-    # CDP Network Interception: Blocks ads, webfonts, and heavy media streams from downloading
-    driver.execute_cdp_cmd("Network.enable", {})
-    driver.execute_cdp_cmd(
-        "Network.setBlockedURLs",
-        {
-            "urls": [
-                "*.woff2", "*.woff", "*.ttf",           # Custom fonts (huge latency bottleneck)
-                "*.mp4", "*.webm", "*.avi", "*.m3u8",   # Video streams
-                "*doubleclick.net*", "*google-analytics.com*", 
-                "*googlesyndication.com*", "*facebook.net*" # Trackers and ads
-            ]
-        },
+    # Block heavy fonts, media files, and background bloat
+    page.route(
+        "**/*.{woff,woff2,ttf,mp4,webm,m3u8}", lambda route: route.abort()
     )
+    page.goto("https://www.google.com")
+    return page
 
-    driver.get("https://www.google.com")
-    return driver
 
-
-driver = get_driver()
+page = get_browser_context()
 
 
 def sanitize_url(raw_url: str) -> str:
@@ -117,30 +92,24 @@ def sanitize_url(raw_url: str) -> str:
     return url
 
 
-def capture_compressed_viewport(driver) -> Image.Image:
-    """Captures viewport and compresses to low-quality JPEG to minimize WebSocket payload."""
-    raw_png = driver.get_screenshot_as_png()
-    img = Image.open(io.BytesIO(raw_png)).convert("RGB")
-
-    buffer = io.BytesIO()
-    # JPEG format at 45% quality reduces image payload size from ~1MB to ~50KB
-    img.save(buffer, format="JPEG", quality=45, optimize=True)
-    buffer.seek(0)
-    return Image.open(buffer)
+def capture_viewport(page) -> Image.Image:
+    """Low-latency native Playwright JPEG screenshot."""
+    screenshot_bytes = page.screenshot(type="jpeg", quality=45)
+    return Image.open(io.BytesIO(screenshot_bytes))
 
 
 # -------------------------------------------------------------------
 # Session State Initialization
 # -------------------------------------------------------------------
 if "current_url" not in st.session_state:
-    st.session_state.current_url = driver.current_url
+    st.session_state.current_url = page.url
 
 if "last_click" not in st.session_state:
     st.session_state.last_click = None
 
 
 # -------------------------------------------------------------------
-# Navigation Bar
+# Top Navigation Bar
 # -------------------------------------------------------------------
 nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
     [0.3, 0.3, 0.3, 0.3, 7.5, 0.6]
@@ -148,25 +117,25 @@ nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
 
 with nav_back:
     if st.button("◀", help="Back", use_container_width=True):
-        driver.back()
-        st.session_state.current_url = driver.current_url
+        page.go_back()
+        st.session_state.current_url = page.url
         st.rerun()
 
 with nav_fwd:
     if st.button("▶", help="Forward", use_container_width=True):
-        driver.forward()
-        st.session_state.current_url = driver.current_url
+        page.go_forward()
+        st.session_state.current_url = page.url
         st.rerun()
 
 with nav_ref:
     if st.button("🔄", help="Reload", use_container_width=True):
-        driver.refresh()
+        page.reload()
         st.rerun()
 
 with nav_home:
     if st.button("🏠", help="Home", use_container_width=True):
-        driver.get("https://www.google.com")
-        st.session_state.current_url = driver.current_url
+        page.goto("https://www.google.com")
+        st.session_state.current_url = page.url
         st.rerun()
 
 with nav_url:
@@ -180,51 +149,38 @@ with nav_url:
 with nav_go:
     if st.button("Go ↵", use_container_width=True):
         clean_url = sanitize_url(target_url_input)
-        driver.get(clean_url)
-        st.session_state.current_url = driver.current_url
+        page.goto(clean_url)
+        st.session_state.current_url = page.url
         st.rerun()
 
 
 # -------------------------------------------------------------------
-# Keyboard & Scroll Tools
+# Direct Typing Handler (Triggers instantly on Enter)
 # -------------------------------------------------------------------
-with st.expander("⌨️ Keyboard & Scroll Tools"):
-    k_col1, k_col2, k_col3, k_col4 = st.columns([4, 1, 1, 1])
+def send_text_to_page():
+    typed_value = st.session_state.get("direct_type_input", "")
+    if typed_value:
+        page.keyboard.type(typed_value)
+        page.keyboard.press("Enter")
+        st.session_state["direct_type_input"] = ""
+        st.session_state.current_url = page.url
 
-    with k_col1:
-        typed_text = st.text_input(
-            "Type text into focused element:",
-            key="type_box",
-            placeholder="Click an element on screen, then type here...",
-            label_visibility="collapsed",
-        )
 
-    with k_col2:
-        if st.button("Send Keys", use_container_width=True):
-            if typed_text:
-                active_el = driver.switch_to.active_element
-                active_el.send_keys(typed_text)
-                active_el.send_keys(Keys.ENTER)
-                st.session_state.current_url = driver.current_url
-                st.rerun()
-
-    with k_col3:
-        if st.button("⬆️ Scroll Up", use_container_width=True):
-            driver.execute_script("window.scrollBy(0, -400);")
-            st.rerun()
-
-    with k_col4:
-        if st.button("⬇️ Scroll Down", use_container_width=True):
-            driver.execute_script("window.scrollBy(0, 400);")
-            st.rerun()
+st.text_input(
+    "⌨️ Direct Type Bar",
+    key="direct_type_input",
+    placeholder="Click any input field on the screen below, type here, and hit Enter...",
+    on_change=send_text_to_page,
+    label_visibility="collapsed",
+)
 
 
 # -------------------------------------------------------------------
-# Isolated Viewport Fragment (Prevents full-page rerun overhead)
+# Interactive Viewport
 # -------------------------------------------------------------------
 @st.fragment
 def render_viewport():
-    img = capture_compressed_viewport(driver)
+    img = capture_viewport(page)
 
     coords = streamlit_image_coordinates(
         img,
@@ -235,15 +191,10 @@ def render_viewport():
         st.session_state.last_click = coords
         x, y = coords["x"], coords["y"]
 
-        js_click_code = f"""
-        var elem = document.elementFromPoint({x}, {y});
-        if (elem) {{
-            elem.click();
-            elem.focus();
-        }}
-        """
-        driver.execute_script(js_click_code)
-        st.session_state.current_url = driver.current_url
+        # Native Playwright click at exact pixel coordinates
+        page.mouse.click(x, y)
+        st.session_state.current_url = page.url
         st.rerun()
+
 
 render_viewport()
