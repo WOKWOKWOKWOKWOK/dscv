@@ -1,23 +1,29 @@
-import base64
 import io
 import os
 import urllib.parse
 from PIL import Image
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_image_coordinates import streamlit_image_coordinates
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
 # -------------------------------------------------------------------
-# Page Config & Styling
+# Page Config & Fullscreen CSS (No Scrollbars, Max Width)
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
 st.markdown(
     """
 <style>
+    /* Remove padding and prevent scrollbars */
+    html, body, [data-testid="stAppViewContainer"] {
+        overflow: hidden !important;
+    }
     .block-container {
-        padding: 0.4rem !important;
+        padding-top: 0.2rem !important;
+        padding-bottom: 0rem !important;
+        padding-left: 0.4rem !important;
+        padding-right: 0.4rem !important;
         max-width: 100% !important;
     }
     header, footer {visibility: hidden;}
@@ -41,6 +47,13 @@ st.markdown(
     .stButton > button:hover {
         background-color: #5f6368 !important;
     }
+    /* Stretch image viewport to fit full screen width */
+    div[data-testid="stImage"] img, canvas, iframe {
+        width: 100% !important;
+        max-height: 84vh !important;
+        object-fit: contain !important;
+        border-radius: 6px;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -48,88 +61,7 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# Self-Creating Custom Component (Direct Keyboard Listener)
-# -------------------------------------------------------------------
-COMPONENT_DIR = os.path.join(os.path.dirname(__file__), "viewport_component")
-os.makedirs(COMPONENT_DIR, exist_ok=True)
-INDEX_HTML = os.path.join(COMPONENT_DIR, "index.html")
-
-# Generates custom client-side HTML/JS component with real-time physical keyboard listeners
-HTML_CONTENT = """<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://cdn.jsdelivr.net/npm/streamlit-component-lib@1.4.0/dist/streamlit-component-lib.js"></script>
-  <style>
-    body { margin: 0; padding: 0; background: #202124; overflow: hidden; font-family: sans-serif; }
-    #container { position: relative; display: inline-block; cursor: crosshair; width: 100%; }
-    #viewport { display: block; width: 100%; height: auto; user-select: none; }
-    #hidden-input {
-      position: absolute;
-      top: 0; left: 0;
-      opacity: 0;
-      width: 1px; height: 1px;
-      border: none; outline: none;
-    }
-  </style>
-</head>
-<body>
-  <div id="container" tabindex="0">
-    <img id="viewport" src="" />
-    <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" capitalize="off" spellcheck="false" />
-  </div>
-  <script>
-    const img = document.getElementById('viewport');
-    const container = document.getElementById('container');
-    const hiddenInput = document.getElementById('hidden-input');
-
-    function onRender(event) {
-      const data = event.detail.args;
-      if (data.image) {
-        img.src = "data:image/jpeg;base64," + data.image;
-      }
-      Streamlit.setFrameHeight(container.offsetHeight || 576);
-    }
-
-    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-    Streamlit.setComponentReady();
-
-    // Click handler: Captures X/Y coordinates and activates physical keyboard listener
-    img.addEventListener('click', (e) => {
-      const rect = img.getBoundingClientRect();
-      const scaleX = 1024 / rect.width;
-      const scaleY = 576 / rect.height;
-      const x = Math.round((e.clientX - rect.left) * scaleX);
-      const y = Math.round((e.clientY - rect.top) * scaleY);
-
-      hiddenInput.value = '';
-      hiddenInput.focus();
-
-      Streamlit.setComponentValue({ type: 'click', x: x, y: y, ts: Date.now() });
-    });
-
-    // Keyboard listener: Intercepts physical typing and Enter keys directly on the image
-    hiddenInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const textVal = hiddenInput.value;
-        hiddenInput.value = '';
-        Streamlit.setComponentValue({ type: 'type', text: textVal, key: 'Enter', ts: Date.now() });
-      }
-    });
-  </script>
-</body>
-</html>
-"""
-
-with open(INDEX_HTML, "w", encoding="utf-8") as f:
-    f.write(HTML_CONTENT)
-
-interactive_viewport = components.declare_component(
-    "interactive_viewport", path=COMPONENT_DIR
-)
-
-
-# -------------------------------------------------------------------
-# CDP Hardware Input Dispatchers
+# CDP Input Helpers
 # -------------------------------------------------------------------
 def cdp_click(driver, x: int, y: int):
     driver.execute_cdp_cmd(
@@ -179,7 +111,7 @@ def cdp_press_enter(driver):
 
 
 # -------------------------------------------------------------------
-# Browser Setup
+# Browser Setup (Higher Resolution)
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_driver():
@@ -188,7 +120,9 @@ def get_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1024,576")
+    
+    # High resolution (1440x810) fills wide screens cleanly
+    options.add_argument("--window-size=1440,810")
 
     options.page_load_strategy = "eager"
     options.add_argument("--disable-extensions")
@@ -247,13 +181,14 @@ def sanitize_url(raw_url: str) -> str:
     return url
 
 
-def capture_compressed_viewport_b64(driver) -> str:
+def capture_compressed_viewport(driver) -> Image.Image:
     raw_png = driver.get_screenshot_as_png()
     img = Image.open(io.BytesIO(raw_png)).convert("RGB")
 
     buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=45, optimize=True)
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    img.save(buffer, format="JPEG", quality=50, optimize=True)
+    buffer.seek(0)
+    return Image.open(buffer)
 
 
 # -------------------------------------------------------------------
@@ -265,8 +200,8 @@ if "current_url" not in st.session_state:
     except Exception:
         st.session_state.current_url = "https://www.google.com"
 
-if "last_event_ts" not in st.session_state:
-    st.session_state.last_event_ts = None
+if "last_click" not in st.session_state:
+    st.session_state.last_click = None
 
 
 # -------------------------------------------------------------------
@@ -316,26 +251,45 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Direct Interactive Viewport (Handles Clicks + Keyboard Input)
+# Typing Bar
 # -------------------------------------------------------------------
-b64_image = capture_compressed_viewport_b64(driver)
+def handle_typing():
+    typed_text = st.session_state.get("type_input_value", "")
+    if typed_text:
+        cdp_type_text(driver, typed_text)
+        cdp_press_enter(driver)
+        st.session_state["type_input_value"] = ""
+        st.session_state.current_url = driver.current_url
 
-event = interactive_viewport(image=b64_image, key="direct_screen_viewport")
 
-if event and event.get("ts") != st.session_state.last_event_ts:
-    st.session_state.last_event_ts = event.get("ts")
-    event_type = event.get("type")
+st.text_input(
+    "Typing Bar",
+    key="type_input_value",
+    placeholder="1. Click text box in image below  →  2. Type text here  →  3. Press Enter",
+    on_change=handle_typing,
+    label_visibility="collapsed",
+)
 
-    if event_type == "click":
-        cdp_click(driver, event["x"], event["y"])
+
+# -------------------------------------------------------------------
+# Viewport Fragment (Full-Screen Fit)
+# -------------------------------------------------------------------
+@st.fragment
+def render_viewport():
+    img = capture_compressed_viewport(driver)
+
+    coords = streamlit_image_coordinates(
+        img,
+        key="full_screen_viewport",
+    )
+
+    if coords is not None and coords != st.session_state.last_click:
+        st.session_state.last_click = coords
+        x, y = coords["x"], coords["y"]
+
+        cdp_click(driver, x, y)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
-    elif event_type == "type":
-        text_to_send = event.get("text", "")
-        if text_to_send:
-            cdp_type_text(driver, text_to_send)
-        if event.get("key") == "Enter":
-            cdp_press_enter(driver)
-        st.session_state.current_url = driver.current_url
-        st.rerun()
+
+render_viewport()
