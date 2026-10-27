@@ -1,1 +1,6 @@
-nodejs
+chromium
+chromium-driver
+xvfb
+libgtk-3-0
+libnss3
+libasound2
