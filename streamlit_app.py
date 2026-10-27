@@ -8,7 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
 # -------------------------------------------------------------------
-# Page Config & Custom Styling
+# Page Config & Styling
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
@@ -47,7 +47,60 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# Driver Setup
+# CDP Hardware Input Helpers
+# -------------------------------------------------------------------
+def cdp_click(driver, x: int, y: int):
+    """Fires hardware-level mouse clicks via Chrome DevTools Protocol."""
+    driver.execute_cdp_cmd(
+        "Input.dispatchMouseEvent",
+        {"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1},
+    )
+    driver.execute_cdp_cmd(
+        "Input.dispatchMouseEvent",
+        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1},
+    )
+
+
+def cdp_type_text(driver, text: str):
+    """Sends keystrokes directly into Chrome's input stream."""
+    for char in text:
+        driver.execute_cdp_cmd(
+            "Input.dispatchKeyEvent",
+            {"type": "keyDown", "text": char, "unmodifiedText": char},
+        )
+        driver.execute_cdp_cmd(
+            "Input.dispatchKeyEvent",
+            {"type": "keyUp", "text": char, "unmodifiedText": char},
+        )
+
+
+def cdp_press_special(driver, key_name: str):
+    """Dispatches special key events (Enter, Backspace, Tab, etc.)."""
+    keys_map = {
+        "Enter": (13, "Enter", "\r"),
+        "Backspace": (8, "Backspace", ""),
+        "Tab": (9, "Tab", "\t"),
+        "Escape": (27, "Escape", ""),
+    }
+    if key_name in keys_map:
+        vk, code, text = keys_map[key_name]
+        payload = {
+            "type": "keyDown",
+            "key": key_name,
+            "code": code,
+            "windowsVirtualKeyCode": vk,
+            "nativeVirtualKeyCode": vk,
+        }
+        if text:
+            payload["text"] = text
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", payload)
+
+        payload["type"] = "keyUp"
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", payload)
+
+
+# -------------------------------------------------------------------
+# Fast Engine Setup
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_driver():
@@ -137,12 +190,9 @@ if "current_url" not in st.session_state:
 if "last_click" not in st.session_state:
     st.session_state.last_click = None
 
-if "last_coords" not in st.session_state:
-    st.session_state.last_coords = None
-
 
 # -------------------------------------------------------------------
-# Top Navigation Bar
+# Navigation Bar
 # -------------------------------------------------------------------
 nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
     [0.3, 0.3, 0.3, 0.3, 7.5, 0.6]
@@ -188,82 +238,45 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Framework-Compliant Typing Handler
+# Hardware Typing Controls
 # -------------------------------------------------------------------
-def send_text_to_page():
-    typed_value = st.session_state.get("direct_type_input", "")
-    if typed_value:
-        x, y = st.session_state.last_coords if st.session_state.last_coords else (512, 288)
+def handle_typing():
+    typed_text = st.session_state.get("type_input_value", "")
+    if typed_text:
+        # Step 1: Inject hardware characters via CDP
+        cdp_type_text(driver, typed_text)
+        # Step 2: Fire hardware Enter key
+        cdp_press_special(driver, "Enter")
 
-        js_type_code = """
-        var x = arguments[0];
-        var y = arguments[1];
-        var text = arguments[2];
-
-        var elem = document.elementFromPoint(x, y);
-        if (!elem) elem = document.activeElement;
-
-        var target = elem;
-        while (target && !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-            target = target.parentElement;
-        }
-        if (!target && elem) {
-            target = elem.querySelector('input, textarea, [contenteditable="true"]') || document.activeElement;
-        }
-        if (!target) target = document.activeElement;
-
-        if (target) {
-            target.focus();
-            if (target.isContentEditable) {
-                target.innerText = text;
-            } else {
-                var setter = null;
-                if (target.tagName === 'TEXTAREA') {
-                    var descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
-                    if (descriptor) setter = descriptor.set;
-                } else if (target.tagName === 'INPUT') {
-                    var descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
-                    if (descriptor) setter = descriptor.set;
-                }
-
-                if (setter) {
-                    setter.call(target, text);
-                } else {
-                    target.value = text;
-                }
-            }
-
-            target.dispatchEvent(new Event('input', { bubbles: true }));
-            target.dispatchEvent(new Event('change', { bubbles: true }));
-
-            if (target.form) {
-                if (typeof target.form.requestSubmit === 'function') {
-                    target.form.requestSubmit();
-                } else {
-                    target.form.submit();
-                }
-            } else {
-                target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, code: 'Enter', which: 13, bubbles: true }));
-                target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, code: 'Enter', which: 13, bubbles: true }));
-            }
-        }
-        """
-        driver.execute_script(js_type_code, x, y, typed_value)
-        st.session_state["direct_type_input"] = ""
+        st.session_state["type_input_value"] = ""
         st.session_state.current_url = driver.current_url
 
 
-st.text_input(
-    "⌨️ Instant Type Bar",
-    key="direct_type_input",
-    placeholder="Click a search box or field below, type here, and press Enter...",
-    on_change=send_text_to_page,
-    label_visibility="collapsed",
-)
+t_col1, t_col2, t_col3 = st.columns([7, 1.5, 1.5])
+
+with t_col1:
+    st.text_input(
+        "Typing Bar",
+        key="type_input_value",
+        placeholder="1. Click text box in image below  →  2. Type text here  →  3. Press Enter...",
+        on_change=handle_typing,
+        label_visibility="collapsed",
+    )
+
+with t_col2:
+    if st.button("⌫ Backspace", use_container_width=True):
+        cdp_press_special(driver, "Backspace")
+        st.rerun()
+
+with t_col3:
+    if st.button("↵ Send Enter", use_container_width=True):
+        cdp_press_special(driver, "Enter")
+        st.session_state.current_url = driver.current_url
+        st.rerun()
 
 
 # -------------------------------------------------------------------
-# Viewport Fragment
+# Viewport Fragment (CDP Click Target)
 # -------------------------------------------------------------------
 @st.fragment
 def render_viewport():
@@ -277,24 +290,9 @@ def render_viewport():
     if coords is not None and coords != st.session_state.last_click:
         st.session_state.last_click = coords
         x, y = coords["x"], coords["y"]
-        st.session_state.last_coords = (x, y)
 
-        safe_click_js = f"""
-        var elem = document.elementFromPoint({x}, {y});
-        if (elem) {{
-            var target = elem;
-            while (target && typeof target.click !== 'function') {{
-                target = target.parentElement;
-            }}
-            if (target) {{
-                target.click();
-                if (typeof target.focus === 'function') target.focus();
-            }} else {{
-                elem.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true, clientX: {x}, clientY: {y}}}));
-            }}
-        }}
-        """
-        driver.execute_script(safe_click_js)
+        # Hardware-level mouse click directly at pixel coordinates
+        cdp_click(driver, x, y)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
