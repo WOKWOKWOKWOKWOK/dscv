@@ -1,10 +1,12 @@
+import io
 import os
 import time
-from io import BytesIO
-import streamlit as st
+import urllib.parse
 from PIL import Image
+import streamlit as st
+import streamlit.components.v1 as components
 
-# Third-party imports for headless browsing
+# Third-party headless browser dependencies
 from pyvirtualdisplay import Display
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -12,22 +14,39 @@ from selenium.webdriver.chrome.service import Service
 
 
 # -------------------------------------------------------------------
-# Helper: Initialize Virtual Display & Headless Chrome
+# Helper: Format & Sanitize User Input URLs
+# -------------------------------------------------------------------
+def sanitize_url(raw_url: str) -> str:
+    """Ensures input strings have a valid scheme to prevent 'invalid argument' Selenium errors."""
+    url = raw_url.strip()
+    if not url:
+        return "https://example.com"
+
+    # Add https protocol if missing scheme
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.scheme:
+        url = f"https://{url}"
+
+    return url
+
+
+# -------------------------------------------------------------------
+# Helper: Display & Driver Initialization
 # -------------------------------------------------------------------
 @st.cache_resource
 def start_virtual_display():
-    """Starts a virtual framebuffer (Xvfb) for headlessly hosting GUI browsers."""
+    """Initializes a virtual framebuffer (Xvfb) on Streamlit Cloud Linux servers."""
     try:
         display = Display(visible=0, size=(1280, 720))
         display.start()
         return display
-    except Exception as e:
-        st.warning(f"Virtual display initialization notice: {e}")
+    except Exception as exc:
+        st.caption(f"Virtual display notice: {exc}")
         return None
 
 
-def get_chrome_driver():
-    """Configures and returns a headless Selenium Chrome WebDriver."""
+def init_chrome_driver():
+    """Configures a robust headless Chrome WebDriver instance."""
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
@@ -36,122 +55,121 @@ def get_chrome_driver():
     chrome_options.add_argument("--window-size=1280,720")
     chrome_options.add_argument(
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # Check common Linux chromium binary locations on Streamlit Cloud
-    possible_paths = ["/usr/bin/chromium", "/usr/bin/chromium-browser"]
-    for path in possible_paths:
-        if os.path.exists(path):
-            chrome_options.binary_location = path
+    # Locate Chromium binary on Linux container
+    for binary_path in ["/usr/bin/chromium", "/usr/bin/chromium-browser"]:
+        if os.path.exists(binary_path):
+            chrome_options.binary_location = binary_path
             break
 
-    driver = webdriver.Chrome(options=chrome_options)
-    return driver
+    return webdriver.Chrome(options=chrome_options)
 
 
 # -------------------------------------------------------------------
-# Streamlit UI Configuration
+# Page Config & Session State Initialization
 # -------------------------------------------------------------------
 st.set_page_config(
-    page_title="Headless Web Browser Host", page_icon="🌐", layout="wide"
+    page_title="Streamlit Web Runner",
+    page_icon="🖥️",
+    layout="wide",
 )
 
-st.title("🌐 Headless Browser & Application Runner")
-st.caption(
-    "Running inside Streamlit Cloud Linux Container with Virtual Display"
-)
-
-# Start virtual display session
+# Start virtual display session once
 start_virtual_display()
 
-# Session state management for browser instance
 if "driver" not in st.session_state:
     st.session_state.driver = None
 
 if "last_screenshot" not in st.session_state:
     st.session_state.last_screenshot = None
 
-# Sidebar controls
-st.sidebar.header("🕹️ Browser Controls")
-
-target_url = st.sidebar.text_input("Enter Target URL:", value="https://example.com")
-
-col_nav1, col_nav2 = st.sidebar.columns(2)
-
-with col_nav1:
-    if st.button("🚀 Launch / Navigate", use_container_width=True):
-        with st.spinner("Opening target site..."):
-            try:
-                if st.session_state.driver is None:
-                    st.session_state.driver = get_chrome_driver()
-
-                st.session_state.driver.get(target_url)
-                time.sleep(2)  # Allow JS and page DOM to stabilize
-
-                # Capture screenshot
-                screenshot_bytes = (
-                    st.session_state.driver.get_screenshot_as_png()
-                )
-                st.session_state.last_screenshot = Image.open(
-                    BytesIO(screenshot_bytes)
-                )
-                st.success("Page loaded successfully!")
-            except Exception as err:
-                st.error(f"Failed to load page: {err}")
-
-with col_nav2:
-    if st.button("🔄 Refresh View", use_container_width=True):
-        if st.session_state.driver:
-            screenshot_bytes = st.session_state.driver.get_screenshot_as_png()
-            st.session_state.last_screenshot = Image.open(
-                BytesIO(screenshot_bytes)
-            )
-            st.rerun()
-        else:
-            st.warning("No active browser session.")
-
-if st.sidebar.button("🛑 Stop Browser Session", use_container_width=True):
-    if st.session_state.driver:
-        st.session_state.driver.quit()
-        st.session_state.driver = None
-        st.session_state.last_screenshot = None
-        st.info("Browser session closed.")
 
 # -------------------------------------------------------------------
-# Main Dashboard View
+# Dashboard UI Layout
 # -------------------------------------------------------------------
-tab_preview, tab_source, tab_info = st.tabs(
-    ["📸 Live Viewport", "📄 HTML Source", "ℹ️ System Info"]
+st.title("🖥️ Streamlit Web Runner & Embedded Viewer")
+
+mode = st.radio(
+    "Select Operating Mode:",
+    ["Headless Browser (Selenium)", "Embedded App Viewer (iFrame)"],
+    horizontal=True,
 )
 
-with tab_preview:
+if mode == "Headless Browser (Selenium)":
+    st.subheader("Headless Browser Session")
+
+    # Controls
+    col_input, col_btn1, col_btn2 = st.columns([3, 1, 1])
+
+    with col_input:
+        raw_target = st.text_input(
+            "Enter Web Address:",
+            value="example.com",
+            placeholder="e.g. google.com or https://example.com",
+        )
+
+    # Automatically format URL to prevent Selenium 'invalid argument' exceptions
+    clean_url = sanitize_url(raw_target)
+
+    with col_btn1:
+        st.write(" ")  # Alignment spacer
+        launch_clicked = st.button("🚀 Load Page", use_container_width=True)
+
+    with col_btn2:
+        st.write(" ")  # Alignment spacer
+        stop_clicked = st.button("🛑 Stop Driver", use_container_width=True)
+
+    # Browser Execution Logic
+    if launch_clicked:
+        with st.spinner(f"Navigating to {clean_url}..."):
+            try:
+                if st.session_state.driver is None:
+                    st.session_state.driver = init_chrome_driver()
+
+                # Execute navigation on sanitized URL
+                st.session_state.driver.get(clean_url)
+                time.sleep(2)  # Wait for rendering
+
+                # Capture viewport image
+                raw_png = st.session_state.driver.get_screenshot_as_png()
+                st.session_state.last_screenshot = Image.open(
+                    io.BytesIO(raw_png)
+                )
+                st.success("Loaded successfully!")
+            except Exception as err:
+                st.error(f"Failed to navigate: {err}")
+
+    if stop_clicked:
+        if st.session_state.driver:
+            st.session_state.driver.quit()
+            st.session_state.driver = None
+            st.session_state.last_screenshot = None
+            st.info("Browser session closed.")
+
+    # Viewport Output
+    st.divider()
     if st.session_state.last_screenshot:
-        st.subheader("Current Browser Screen")
         st.image(
             st.session_state.last_screenshot,
+            caption=f"Active URL: {clean_url}",
             use_container_width=True,
-            caption=f"Viewport: {target_url}",
         )
     else:
-        st.info(
-            "Click **Launch / Navigate** in the sidebar to start hosting the browser session."
-        )
+        st.info("Enter a web address and click **Load Page** to render.")
 
-with tab_source:
-    if st.session_state.driver:
-        st.subheader("Page Source Code")
-        st.code(st.session_state.driver.page_source[:5000], language="html")
-    else:
-        st.write("No active HTML source loaded.")
+else:
+    st.subheader("Embedded Application Frame")
+    st.caption("Embed externally hosted services or web applications.")
 
-with tab_info:
-    st.subheader("Container Environment Status")
-    st.json(
-        {
-            "Python Streamlit": "Active",
-            "Virtual Display": "Xvfb Enabled",
-            "Headless Engine": "Chromium Driver",
-            "Session Active": st.session_state.driver is not None,
-        }
+    iframe_url_input = st.text_input(
+        "Enter Hosted App URL:",
+        value="https://example.com",
+        help="Paste the external HTTPS link of your hosted app.",
     )
+
+    clean_iframe_url = sanitize_url(iframe_url_input)
+
+    st.write(f"**Rendering:** `{clean_iframe_url}`")
+    components.iframe(clean_iframe_url, height=750, scrolling=True)
