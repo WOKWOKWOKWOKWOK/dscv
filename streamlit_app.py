@@ -8,23 +8,22 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
 # -------------------------------------------------------------------
-# Page Config & Fullscreen CSS (No Scrollbars, Max Width)
+# Page Config & Strict Fullscreen Layout (No Page Scrollbars)
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
 st.markdown(
     """
 <style>
-    /* Remove padding and prevent scrollbars */
-    html, body, [data-testid="stAppViewContainer"] {
+    /* Lock root view to 100vh and hide window scrollbars */
+    html, body, [data-testid="stAppViewContainer"], .main {
+        height: 100vh !important;
         overflow: hidden !important;
     }
     .block-container {
-        padding-top: 0.2rem !important;
-        padding-bottom: 0rem !important;
-        padding-left: 0.4rem !important;
-        padding-right: 0.4rem !important;
+        padding: 0.2rem 0.4rem 0rem 0.4rem !important;
         max-width: 100% !important;
+        height: 100vh !important;
     }
     header, footer {visibility: hidden;}
     .stApp {
@@ -37,22 +36,24 @@ st.markdown(
         border-radius: 20px !important;
         border: 1px solid #5f6368 !important;
         padding-left: 15px !important;
+        height: 38px !important;
     }
     .stButton > button {
         border-radius: 8px !important;
         background-color: #3c4043 !important;
         color: #ffffff !important;
         border: none !important;
+        height: 38px !important;
     }
     .stButton > button:hover {
         background-color: #5f6368 !important;
     }
-    /* Stretch image viewport to fit full screen width */
-    div[data-testid="stImage"] img, canvas, iframe {
+    /* Restrain image element to viewport budget */
+    div[data-testid="stImage"] img {
         width: 100% !important;
-        max-height: 84vh !important;
+        max-height: 78vh !important;
         object-fit: contain !important;
-        border-radius: 6px;
+        border-radius: 4px;
     }
 </style>
 """,
@@ -61,7 +62,7 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# CDP Input Helpers
+# CDP Hardware Input Dispatchers
 # -------------------------------------------------------------------
 def cdp_click(driver, x: int, y: int):
     driver.execute_cdp_cmd(
@@ -111,8 +112,12 @@ def cdp_press_enter(driver):
 
 
 # -------------------------------------------------------------------
-# Browser Setup (Higher Resolution)
+# Driver Setup (Fixed 1280x720 Canvas Resolution)
 # -------------------------------------------------------------------
+CHROME_WIDTH = 1280
+CHROME_HEIGHT = 720
+
+
 @st.cache_resource
 def get_driver():
     options = Options()
@@ -120,9 +125,7 @@ def get_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    
-    # High resolution (1440x810) fills wide screens cleanly
-    options.add_argument("--window-size=1440,810")
+    options.add_argument(f"--window-size={CHROME_WIDTH},{CHROME_HEIGHT}")
 
     options.page_load_strategy = "eager"
     options.add_argument("--disable-extensions")
@@ -251,7 +254,7 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Typing Bar
+# Typing Input Handler
 # -------------------------------------------------------------------
 def handle_typing():
     typed_text = st.session_state.get("type_input_value", "")
@@ -265,14 +268,14 @@ def handle_typing():
 st.text_input(
     "Typing Bar",
     key="type_input_value",
-    placeholder="1. Click text box in image below  →  2. Type text here  →  3. Press Enter",
+    placeholder="1. Click search box in image below  →  2. Type here  →  3. Press Enter",
     on_change=handle_typing,
     label_visibility="collapsed",
 )
 
 
 # -------------------------------------------------------------------
-# Viewport Fragment (Full-Screen Fit)
+# Viewport Fragment with Dynamic Coordinate Scaling
 # -------------------------------------------------------------------
 @st.fragment
 def render_viewport():
@@ -285,9 +288,18 @@ def render_viewport():
 
     if coords is not None and coords != st.session_state.last_click:
         st.session_state.last_click = coords
-        x, y = coords["x"], coords["y"]
 
-        cdp_click(driver, x, y)
+        # Dynamic Coordinate Scaling: Converts display click position to internal Chrome coordinates
+        rendered_width = coords.get("width", CHROME_WIDTH)
+        rendered_height = coords.get("height", CHROME_HEIGHT)
+
+        scale_x = CHROME_WIDTH / rendered_width
+        scale_y = CHROME_HEIGHT / rendered_height
+
+        real_x = int(coords["x"] * scale_x)
+        real_y = int(coords["y"] * scale_y)
+
+        cdp_click(driver, real_x, real_y)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
