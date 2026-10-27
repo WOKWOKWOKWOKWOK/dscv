@@ -13,14 +13,13 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 
 # -------------------------------------------------------------------
-# Page Config & Full-Width Full-Screen Styling
+# Page Config & Layout
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
 st.markdown(
     """
 <style>
-    /* Remove default Streamlit padding to maximize browser area */
     .block-container {
         padding-top: 0.8rem !important;
         padding-bottom: 0rem !important;
@@ -34,7 +33,6 @@ st.markdown(
         background-color: #202124;
         color: #e8eaed;
     }
-    /* Chrome Dark Omnibox Styling */
     div[data-testid="stTextInput"] > div > div > input {
         background-color: #35363a !important;
         color: #ffffff !important;
@@ -62,9 +60,9 @@ st.markdown(
 # -------------------------------------------------------------------
 @st.cache_resource
 def start_virtual_display():
-    """Initializes Xvfb virtual framebuffer for headless execution."""
     try:
-        display = Display(visible=0, size=(1920, 1080))
+        # Reduced display size to 1280x720 for faster rendering
+        display = Display(visible=0, size=(1280, 720))
         display.start()
         return display
     except Exception:
@@ -72,13 +70,14 @@ def start_virtual_display():
 
 
 def init_chrome_driver():
-    """Initializes Selenium Chrome WebDriver at 1080p full resolution."""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--window-size=1280,720")
+    # Speed options
+    options.add_argument("--blink-settings=imagesEnabled=true")
     options.add_argument(
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -93,7 +92,6 @@ def init_chrome_driver():
 
 
 def sanitize_url(raw_url: str) -> str:
-    """Formats raw string inputs to prevent Selenium invalid argument errors."""
     url = raw_url.strip()
     if not url:
         return "https://www.google.com"
@@ -103,10 +101,16 @@ def sanitize_url(raw_url: str) -> str:
     return url
 
 
-def capture_viewport(driver) -> Image.Image:
-    """Captures screenshot buffer from Selenium."""
+def capture_viewport_compressed(driver) -> Image.Image:
+    """Captures screenshot and converts to compressed JPEG to reduce bandwidth."""
     raw_png = driver.get_screenshot_as_png()
-    return Image.open(io.BytesIO(raw_png))
+    img = Image.open(io.BytesIO(raw_png)).convert("RGB")
+
+    # Compress image buffer to speed up websocket transmission
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=60, optimize=True)
+    buffer.seek(0)
+    return Image.open(buffer)
 
 
 # -------------------------------------------------------------------
@@ -128,7 +132,7 @@ driver = st.session_state.driver
 
 
 # -------------------------------------------------------------------
-# Top Address Bar (Chrome Omnibox)
+# Top Address Bar
 # -------------------------------------------------------------------
 nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
     [0.3, 0.3, 0.3, 0.3, 7.5, 0.6]
@@ -137,27 +141,27 @@ nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
 with nav_back:
     if st.button("◀", help="Back", use_container_width=True):
         driver.back()
-        time.sleep(1)
+        time.sleep(0.3)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
 with nav_fwd:
     if st.button("▶", help="Forward", use_container_width=True):
         driver.forward()
-        time.sleep(1)
+        time.sleep(0.3)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
 with nav_ref:
     if st.button("🔄", help="Reload", use_container_width=True):
         driver.refresh()
-        time.sleep(1)
+        time.sleep(0.3)
         st.rerun()
 
 with nav_home:
     if st.button("🏠", help="Home", use_container_width=True):
         driver.get("https://www.google.com")
-        time.sleep(1)
+        time.sleep(0.3)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
@@ -173,7 +177,7 @@ with nav_go:
     if st.button("Go ↵", use_container_width=True):
         clean_url = sanitize_url(target_url_input)
         driver.get(clean_url)
-        time.sleep(2)
+        time.sleep(1.0)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
@@ -181,14 +185,14 @@ with nav_go:
 # -------------------------------------------------------------------
 # Minimal Collapsible Keyboard & Scroll Bar
 # -------------------------------------------------------------------
-with st.expander("⌨️ Keyboard & Scroll Tools (Click to open/close)"):
+with st.expander("⌨️ Keyboard & Scroll Tools"):
     k_col1, k_col2, k_col3, k_col4 = st.columns([4, 1, 1, 1])
 
     with k_col1:
         typed_text = st.text_input(
             "Type text into focused element:",
             key="type_box",
-            placeholder="Click an element on the screen first, then type here...",
+            placeholder="Click an element on screen, then type here...",
             label_visibility="collapsed",
         )
 
@@ -198,40 +202,38 @@ with st.expander("⌨️ Keyboard & Scroll Tools (Click to open/close)"):
                 active_el = driver.switch_to.active_element
                 active_el.send_keys(typed_text)
                 active_el.send_keys(Keys.ENTER)
-                time.sleep(1.5)
+                time.sleep(0.5)
                 st.session_state.current_url = driver.current_url
                 st.rerun()
 
     with k_col3:
         if st.button("⬆️ Scroll Up", use_container_width=True):
-            driver.execute_script("window.scrollBy(0, -500);")
-            time.sleep(0.5)
+            driver.execute_script("window.scrollBy(0, -400);")
+            time.sleep(0.2)
             st.rerun()
 
     with k_col4:
         if st.button("⬇️ Scroll Down", use_container_width=True):
-            driver.execute_script("window.scrollBy(0, 500);")
-            time.sleep(0.5)
+            driver.execute_script("window.scrollBy(0, 400);")
+            time.sleep(0.2)
             st.rerun()
 
 
 # -------------------------------------------------------------------
-# Full-Width Interactive Viewport
+# Interactive Compressed Viewport
 # -------------------------------------------------------------------
-img = capture_viewport(driver)
+img = capture_viewport_compressed(driver)
 
-# Render full screen interactive screenshot
 coords = streamlit_image_coordinates(
     img,
     key="full_screen_viewport",
 )
 
-# Process direct clicks anywhere on the viewport image
 if coords is not None and coords != st.session_state.last_click:
     st.session_state.last_click = coords
     x, y = coords["x"], coords["y"]
 
-    # Inject click at direct pixel coordinates
+    # Reduced wait times from 1.5s to 0.4s for lower latency
     js_click_code = f"""
     var elem = document.elementFromPoint({x}, {y});
     if (elem) {{
@@ -240,6 +242,6 @@ if coords is not None and coords != st.session_state.last_click:
     }}
     """
     driver.execute_script(js_click_code)
-    time.sleep(1.5)
+    time.sleep(0.4)
     st.session_state.current_url = driver.current_url
     st.rerun()
