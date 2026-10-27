@@ -1,67 +1,157 @@
+import os
+import time
+from io import BytesIO
 import streamlit as st
-import pandas as pd
-import numpy as np
+from PIL import Image
 
-# Set the dashboard layout profile to wide mode
-st.set_page_config(layout="wide", page_title="⚡ Utopia Operations Center")
+# Third-party imports for headless browsing
+from pyvirtualdisplay import Display
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
-# --- 1. HEADER PANEL ---
-st.title("⚡ Utopia Live Operations Center")
-st.markdown("---")
 
-# --- 2. LIVE METRIC TILES ---
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric(label="Active Server Engine Node", value="Container v20.19.2", delta="Status: Ready")
-with col2:
-    st.metric(label="Active Network Socket Pipeline", value="Port 8296", delta="Status: Secure")
-with col3:
-    st.metric(label="Traffic Response Handshake Latency", value="4.2 ms", delta="-0.8 ms (Optimal)")
-with col4:
-    st.metric(label="Active Process Thread Buffer", value="98.4%", delta="Healthy")
+# -------------------------------------------------------------------
+# Helper: Initialize Virtual Display & Headless Chrome
+# -------------------------------------------------------------------
+@st.cache_resource
+def start_virtual_display():
+    """Starts a virtual framebuffer (Xvfb) for headlessly hosting GUI browsers."""
+    try:
+        display = Display(visible=0, size=(1280, 720))
+        display.start()
+        return display
+    except Exception as e:
+        st.warning(f"Virtual display initialization notice: {e}")
+        return None
 
-st.markdown("---")
 
-# --- 3. GRAPHICAL PANEL VIEWPORTS ---
-left_chart_panel, right_chart_panel = st.columns(2)
-
-with left_chart_panel:
-    st.subheader("📈 Real-Time Network Packet Throughput")
-    time_series_data = pd.DataFrame(
-        np.random.randn(20, 3),
-        columns=['Incoming Packets', 'Routed Handshakes', 'Cached System Buffers']
+def get_chrome_driver():
+    """Configures and returns a headless Selenium Chrome WebDriver."""
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1280,720")
+    chrome_options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
     )
-    st.line_chart(time_series_data)
 
-with right_chart_panel:
-    st.subheader("📊 System Architecture Thread Load Distribution")
-    # FIXED: Restored the missing resource numerical list array elements
-    architecture_thread_load = pd.DataFrame({
-        'Virtual Sockets': ['Node Gateway A', 'Proxy Tunnel B', 'Module Buffer C', 'Static Compiler D'],
-        'Resource Consumption (%)': [45, 72, 18, 61]
-    })
-    st.bar_chart(architecture_thread_load.set_index('Virtual Sockets'))
+    # Check common Linux chromium binary locations on Streamlit Cloud
+    possible_paths = ["/usr/bin/chromium", "/usr/bin/chromium-browser"]
+    for path in possible_paths:
+        if os.path.exists(path):
+            chrome_options.binary_location = path
+            break
 
-st.markdown("---")
+    driver = webdriver.Chrome(options=chrome_options)
+    return driver
 
-# --- 4. INTERACTIVE ADMINISTRATIVE INTERFACE TERMINAL ---
-st.subheader("🛠️ Active Environment Management")
 
-action_left, action_right = st.columns(2)
-with action_left:
-    user_input_command = st.text_input("Execute Custom Data Pipeline Target:", value="/proxy/gateway/init")
-with action_right:
-    system_profile_mode = st.selectbox("Assign Application Traffic Profile Mode:", ["Standard Proxy Routing", "Isolated Loop Sandbox", "High-Throughput Node Cache"])
+# -------------------------------------------------------------------
+# Streamlit UI Configuration
+# -------------------------------------------------------------------
+st.set_page_config(
+    page_title="Headless Web Browser Host", page_icon="🌐", layout="wide"
+)
 
-if st.button("⚡ Apply Environment Profiles"):
-    st.success(f"Successfully processed directive! Target route `{user_input_command}` synchronized to `{system_profile_mode}` execution pipeline.")
-    
-    # Render an administrative audit snapshot trace live on screen
-    st.markdown("**Generated Configuration Security Footprint Manifest:**")
-    st.json({
-        "environment": "Streamlit Cloud Sandbox Container",
-        "active_port_lane": 8296,
-        "traffic_routing_policy": system_profile_mode,
-        "isolated_target_path": user_input_command,
-        "security_handshake": "AES-256-GCM Verified"
-    })
+st.title("🌐 Headless Browser & Application Runner")
+st.caption(
+    "Running inside Streamlit Cloud Linux Container with Virtual Display"
+)
+
+# Start virtual display session
+start_virtual_display()
+
+# Session state management for browser instance
+if "driver" not in st.session_state:
+    st.session_state.driver = None
+
+if "last_screenshot" not in st.session_state:
+    st.session_state.last_screenshot = None
+
+# Sidebar controls
+st.sidebar.header("🕹️ Browser Controls")
+
+target_url = st.sidebar.text_input("Enter Target URL:", value="https://example.com")
+
+col_nav1, col_nav2 = st.sidebar.columns(2)
+
+with col_nav1:
+    if st.button("🚀 Launch / Navigate", use_container_width=True):
+        with st.spinner("Opening target site..."):
+            try:
+                if st.session_state.driver is None:
+                    st.session_state.driver = get_chrome_driver()
+
+                st.session_state.driver.get(target_url)
+                time.sleep(2)  # Allow JS and page DOM to stabilize
+
+                # Capture screenshot
+                screenshot_bytes = (
+                    st.session_state.driver.get_screenshot_as_png()
+                )
+                st.session_state.last_screenshot = Image.open(
+                    BytesIO(screenshot_bytes)
+                )
+                st.success("Page loaded successfully!")
+            except Exception as err:
+                st.error(f"Failed to load page: {err}")
+
+with col_nav2:
+    if st.button("🔄 Refresh View", use_container_width=True):
+        if st.session_state.driver:
+            screenshot_bytes = st.session_state.driver.get_screenshot_as_png()
+            st.session_state.last_screenshot = Image.open(
+                BytesIO(screenshot_bytes)
+            )
+            st.rerun()
+        else:
+            st.warning("No active browser session.")
+
+if st.sidebar.button("🛑 Stop Browser Session", use_container_width=True):
+    if st.session_state.driver:
+        st.session_state.driver.quit()
+        st.session_state.driver = None
+        st.session_state.last_screenshot = None
+        st.info("Browser session closed.")
+
+# -------------------------------------------------------------------
+# Main Dashboard View
+# -------------------------------------------------------------------
+tab_preview, tab_source, tab_info = st.tabs(
+    ["📸 Live Viewport", "📄 HTML Source", "ℹ️ System Info"]
+)
+
+with tab_preview:
+    if st.session_state.last_screenshot:
+        st.subheader("Current Browser Screen")
+        st.image(
+            st.session_state.last_screenshot,
+            use_container_width=True,
+            caption=f"Viewport: {target_url}",
+        )
+    else:
+        st.info(
+            "Click **Launch / Navigate** in the sidebar to start hosting the browser session."
+        )
+
+with tab_source:
+    if st.session_state.driver:
+        st.subheader("Page Source Code")
+        st.code(st.session_state.driver.page_source[:5000], language="html")
+    else:
+        st.write("No active HTML source loaded.")
+
+with tab_info:
+    st.subheader("Container Environment Status")
+    st.json(
+        {
+            "Python Streamlit": "Active",
+            "Virtual Display": "Xvfb Enabled",
+            "Headless Engine": "Chromium Driver",
+            "Session Active": st.session_state.driver is not None,
+        }
+    )
