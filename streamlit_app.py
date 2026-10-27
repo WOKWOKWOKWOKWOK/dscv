@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import urllib.parse
 from PIL import Image
@@ -7,10 +6,9 @@ import streamlit as st
 from streamlit_image_coordinates import streamlit_image_coordinates
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.keys import Keys
 
 # -------------------------------------------------------------------
-# Page Config & Layout
+# Page Config & Custom Styling
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
@@ -190,42 +188,67 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Direct Element Targeting Text Handler
+# Framework-Compliant Typing Handler
 # -------------------------------------------------------------------
 def send_text_to_page():
     typed_value = st.session_state.get("direct_type_input", "")
     if typed_value:
-        try:
-            # If coordinates exist, directly grab the target input element at that location
-            if st.session_state.last_coords:
-                x, y = st.session_state.last_coords
-                target_elem = driver.execute_script(
-                    f"""
-                    var elem = document.elementFromPoint({x}, {y});
-                    if (!elem) return null;
-                    var target = elem;
-                    while (target && !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {{
-                        target = target.parentElement;
-                    }}
-                    if (!target) {{
-                        target = elem.querySelector('input, textarea, [contenteditable="true"]') || elem;
-                    }}
-                    return target;
-                    """
-                )
-                if target_elem:
-                    target_elem.send_keys(typed_value)
-                    target_elem.send_keys(Keys.ENTER)
-                else:
-                    # Fallback to active element
-                    driver.switch_to.active_element.send_keys(typed_value)
-                    driver.switch_to.active_element.send_keys(Keys.ENTER)
-            else:
-                driver.switch_to.active_element.send_keys(typed_value)
-                driver.switch_to.active_element.send_keys(Keys.ENTER)
-        except Exception:
-            pass
+        x, y = st.session_state.last_coords if st.session_state.last_coords else (512, 288)
 
+        js_type_code = """
+        var x = arguments[0];
+        var y = arguments[1];
+        var text = arguments[2];
+
+        var elem = document.elementFromPoint(x, y);
+        if (!elem) elem = document.activeElement;
+
+        var target = elem;
+        while (target && !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+            target = target.parentElement;
+        }
+        if (!target && elem) {
+            target = elem.querySelector('input, textarea, [contenteditable="true"]') || document.activeElement;
+        }
+        if (!target) target = document.activeElement;
+
+        if (target) {
+            target.focus();
+            if (target.isContentEditable) {
+                target.innerText = text;
+            } else {
+                var setter = null;
+                if (target.tagName === 'TEXTAREA') {
+                    var descriptor = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+                    if (descriptor) setter = descriptor.set;
+                } else if (target.tagName === 'INPUT') {
+                    var descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+                    if (descriptor) setter = descriptor.set;
+                }
+
+                if (setter) {
+                    setter.call(target, text);
+                } else {
+                    target.value = text;
+                }
+            }
+
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+
+            if (target.form) {
+                if (typeof target.form.requestSubmit === 'function') {
+                    target.form.requestSubmit();
+                } else {
+                    target.form.submit();
+                }
+            } else {
+                target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, code: 'Enter', which: 13, bubbles: true }));
+                target.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, code: 'Enter', which: 13, bubbles: true }));
+            }
+        }
+        """
+        driver.execute_script(js_type_code, x, y, typed_value)
         st.session_state["direct_type_input"] = ""
         st.session_state.current_url = driver.current_url
 
@@ -233,7 +256,7 @@ def send_text_to_page():
 st.text_input(
     "⌨️ Instant Type Bar",
     key="direct_type_input",
-    placeholder="Click a text box in the image below, type here, and hit Enter...",
+    placeholder="Click a search box or field below, type here, and press Enter...",
     on_change=send_text_to_page,
     label_visibility="collapsed",
 )
