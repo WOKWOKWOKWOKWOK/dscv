@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import urllib.parse
 from PIL import Image
@@ -9,7 +10,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 
 # -------------------------------------------------------------------
-# Page Config & Custom Styling
+# Page Config & Layout
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
@@ -189,35 +190,42 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Reliable Text Typing Handler
+# Direct Element Targeting Text Handler
 # -------------------------------------------------------------------
 def send_text_to_page():
     typed_value = st.session_state.get("direct_type_input", "")
     if typed_value:
         try:
-            # Re-focus the target element using stored click coordinates if active element lost focus
+            # If coordinates exist, directly grab the target input element at that location
             if st.session_state.last_coords:
-                lx, ly = st.session_state.last_coords
-                re_focus_js = f"""
-                var elem = document.elementFromPoint({lx}, {ly});
-                if (elem) {{
+                x, y = st.session_state.last_coords
+                target_elem = driver.execute_script(
+                    f"""
+                    var elem = document.elementFromPoint({x}, {y});
+                    if (!elem) return null;
                     var target = elem;
-                    while (target && typeof target.focus !== 'function') {{
+                    while (target && !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {{
                         target = target.parentElement;
                     }}
-                    if (target) {{
-                        target.focus();
-                        if (typeof target.click === 'function') target.click();
+                    if (!target) {{
+                        target = elem.querySelector('input, textarea, [contenteditable="true"]') || elem;
                     }}
-                }}
-                """
-                driver.execute_script(re_focus_js)
-
-            active_el = driver.switch_to.active_element
-            active_el.send_keys(typed_value)
-            active_el.send_keys(Keys.ENTER)
+                    return target;
+                    """
+                )
+                if target_elem:
+                    target_elem.send_keys(typed_value)
+                    target_elem.send_keys(Keys.ENTER)
+                else:
+                    # Fallback to active element
+                    driver.switch_to.active_element.send_keys(typed_value)
+                    driver.switch_to.active_element.send_keys(Keys.ENTER)
+            else:
+                driver.switch_to.active_element.send_keys(typed_value)
+                driver.switch_to.active_element.send_keys(Keys.ENTER)
         except Exception:
             pass
+
         st.session_state["direct_type_input"] = ""
         st.session_state.current_url = driver.current_url
 
@@ -225,14 +233,14 @@ def send_text_to_page():
 st.text_input(
     "⌨️ Instant Type Bar",
     key="direct_type_input",
-    placeholder="Click an input box below, type here, and hit Enter...",
+    placeholder="Click a text box in the image below, type here, and hit Enter...",
     on_change=send_text_to_page,
     label_visibility="collapsed",
 )
 
 
 # -------------------------------------------------------------------
-# Viewport Fragment (Safe Click Handler)
+# Viewport Fragment
 # -------------------------------------------------------------------
 @st.fragment
 def render_viewport():
@@ -248,7 +256,6 @@ def render_viewport():
         x, y = coords["x"], coords["y"]
         st.session_state.last_coords = (x, y)
 
-        # Safe element resolution prevents 'elem.click is not a function' on SVGs/Text Nodes
         safe_click_js = f"""
         var elem = document.elementFromPoint({x}, {y});
         if (elem) {{
