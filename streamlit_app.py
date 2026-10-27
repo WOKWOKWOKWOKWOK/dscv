@@ -9,7 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 
 # -------------------------------------------------------------------
-# Page Config & Layout
+# Page Config & Custom Styling
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
@@ -48,7 +48,7 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# High-Speed Thread-Safe Selenium Engine
+# Driver Setup
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_driver():
@@ -59,7 +59,6 @@ def get_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1024,576")
 
-    # Fast page load & memory optimization flags
     options.page_load_strategy = "eager"
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-component-update")
@@ -84,7 +83,6 @@ def get_driver():
     driver = webdriver.Chrome(options=options)
     driver.implicitly_wait(0.2)
 
-    # CDP Request Interception: Blocks fonts, videos, and ads to boost load speeds
     try:
         driver.execute_cdp_cmd("Network.enable", {})
         driver.execute_cdp_cmd(
@@ -119,12 +117,10 @@ def sanitize_url(raw_url: str) -> str:
 
 
 def capture_compressed_viewport(driver) -> Image.Image:
-    """Captures screenshot and converts to low-quality JPEG to minimize bandwidth."""
     raw_png = driver.get_screenshot_as_png()
     img = Image.open(io.BytesIO(raw_png)).convert("RGB")
 
     buffer = io.BytesIO()
-    # JPEG format at 45% quality reduces image payload from ~1MB to ~50KB
     img.save(buffer, format="JPEG", quality=45, optimize=True)
     buffer.seek(0)
     return Image.open(buffer)
@@ -141,6 +137,9 @@ if "current_url" not in st.session_state:
 
 if "last_click" not in st.session_state:
     st.session_state.last_click = None
+
+if "last_coords" not in st.session_state:
+    st.session_state.last_coords = None
 
 
 # -------------------------------------------------------------------
@@ -190,12 +189,30 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Instant Type Bar (Triggers typing immediately on Enter)
+# Reliable Text Typing Handler
 # -------------------------------------------------------------------
 def send_text_to_page():
     typed_value = st.session_state.get("direct_type_input", "")
     if typed_value:
         try:
+            # Re-focus the target element using stored click coordinates if active element lost focus
+            if st.session_state.last_coords:
+                lx, ly = st.session_state.last_coords
+                re_focus_js = f"""
+                var elem = document.elementFromPoint({lx}, {ly});
+                if (elem) {{
+                    var target = elem;
+                    while (target && typeof target.focus !== 'function') {{
+                        target = target.parentElement;
+                    }}
+                    if (target) {{
+                        target.focus();
+                        if (typeof target.click === 'function') target.click();
+                    }}
+                }}
+                """
+                driver.execute_script(re_focus_js)
+
             active_el = driver.switch_to.active_element
             active_el.send_keys(typed_value)
             active_el.send_keys(Keys.ENTER)
@@ -208,14 +225,14 @@ def send_text_to_page():
 st.text_input(
     "⌨️ Instant Type Bar",
     key="direct_type_input",
-    placeholder="Click any input field below, type here, and hit Enter...",
+    placeholder="Click an input box below, type here, and hit Enter...",
     on_change=send_text_to_page,
     label_visibility="collapsed",
 )
 
 
 # -------------------------------------------------------------------
-# Viewport Fragment
+# Viewport Fragment (Safe Click Handler)
 # -------------------------------------------------------------------
 @st.fragment
 def render_viewport():
@@ -229,15 +246,25 @@ def render_viewport():
     if coords is not None and coords != st.session_state.last_click:
         st.session_state.last_click = coords
         x, y = coords["x"], coords["y"]
+        st.session_state.last_coords = (x, y)
 
-        js_click_code = f"""
+        # Safe element resolution prevents 'elem.click is not a function' on SVGs/Text Nodes
+        safe_click_js = f"""
         var elem = document.elementFromPoint({x}, {y});
         if (elem) {{
-            elem.click();
-            elem.focus();
+            var target = elem;
+            while (target && typeof target.click !== 'function') {{
+                target = target.parentElement;
+            }}
+            if (target) {{
+                target.click();
+                if (typeof target.focus === 'function') target.focus();
+            }} else {{
+                elem.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true, clientX: {x}, clientY: {y}}}));
+            }}
         }}
         """
-        driver.execute_script(js_click_code)
+        driver.execute_script(safe_click_js)
         st.session_state.current_url = driver.current_url
         st.rerun()
 
