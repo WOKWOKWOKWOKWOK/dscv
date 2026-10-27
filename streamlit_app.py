@@ -1,9 +1,10 @@
+import base64
 import io
 import os
 import urllib.parse
 from PIL import Image
 import streamlit as st
-from streamlit_image_coordinates import streamlit_image_coordinates
+import streamlit.components.v1 as components
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
@@ -47,10 +48,90 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# CDP Hardware Input Helpers
+# Self-Creating Custom Component (Direct Keyboard Listener)
+# -------------------------------------------------------------------
+COMPONENT_DIR = os.path.join(os.path.dirname(__file__), "viewport_component")
+os.makedirs(COMPONENT_DIR, exist_ok=True)
+INDEX_HTML = os.path.join(COMPONENT_DIR, "index.html")
+
+# Generates custom client-side HTML/JS component with real-time physical keyboard listeners
+HTML_CONTENT = """<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/streamlit-component-lib@1.4.0/dist/streamlit-component-lib.js"></script>
+  <style>
+    body { margin: 0; padding: 0; background: #202124; overflow: hidden; font-family: sans-serif; }
+    #container { position: relative; display: inline-block; cursor: crosshair; width: 100%; }
+    #viewport { display: block; width: 100%; height: auto; user-select: none; }
+    #hidden-input {
+      position: absolute;
+      top: 0; left: 0;
+      opacity: 0;
+      width: 1px; height: 1px;
+      border: none; outline: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="container" tabindex="0">
+    <img id="viewport" src="" />
+    <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" capitalize="off" spellcheck="false" />
+  </div>
+  <script>
+    const img = document.getElementById('viewport');
+    const container = document.getElementById('container');
+    const hiddenInput = document.getElementById('hidden-input');
+
+    function onRender(event) {
+      const data = event.detail.args;
+      if (data.image) {
+        img.src = "data:image/jpeg;base64," + data.image;
+      }
+      Streamlit.setFrameHeight(container.offsetHeight || 576);
+    }
+
+    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+    Streamlit.setComponentReady();
+
+    // Click handler: Captures X/Y coordinates and activates physical keyboard listener
+    img.addEventListener('click', (e) => {
+      const rect = img.getBoundingClientRect();
+      const scaleX = 1024 / rect.width;
+      const scaleY = 576 / rect.height;
+      const x = Math.round((e.clientX - rect.left) * scaleX);
+      const y = Math.round((e.clientY - rect.top) * scaleY);
+
+      hiddenInput.value = '';
+      hiddenInput.focus();
+
+      Streamlit.setComponentValue({ type: 'click', x: x, y: y, ts: Date.now() });
+    });
+
+    // Keyboard listener: Intercepts physical typing and Enter keys directly on the image
+    hiddenInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const textVal = hiddenInput.value;
+        hiddenInput.value = '';
+        Streamlit.setComponentValue({ type: 'type', text: textVal, key: 'Enter', ts: Date.now() });
+      }
+    });
+  </script>
+</body>
+</html>
+"""
+
+with open(INDEX_HTML, "w", encoding="utf-8") as f:
+    f.write(HTML_CONTENT)
+
+interactive_viewport = components.declare_component(
+    "interactive_viewport", path=COMPONENT_DIR
+)
+
+
+# -------------------------------------------------------------------
+# CDP Hardware Input Dispatchers
 # -------------------------------------------------------------------
 def cdp_click(driver, x: int, y: int):
-    """Fires hardware-level mouse clicks via Chrome DevTools Protocol."""
     driver.execute_cdp_cmd(
         "Input.dispatchMouseEvent",
         {"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1},
@@ -62,7 +143,6 @@ def cdp_click(driver, x: int, y: int):
 
 
 def cdp_type_text(driver, text: str):
-    """Sends keystrokes directly into Chrome's input stream."""
     for char in text:
         driver.execute_cdp_cmd(
             "Input.dispatchKeyEvent",
@@ -74,33 +154,32 @@ def cdp_type_text(driver, text: str):
         )
 
 
-def cdp_press_special(driver, key_name: str):
-    """Dispatches special key events (Enter, Backspace, Tab, etc.)."""
-    keys_map = {
-        "Enter": (13, "Enter", "\r"),
-        "Backspace": (8, "Backspace", ""),
-        "Tab": (9, "Tab", "\t"),
-        "Escape": (27, "Escape", ""),
-    }
-    if key_name in keys_map:
-        vk, code, text = keys_map[key_name]
-        payload = {
+def cdp_press_enter(driver):
+    driver.execute_cdp_cmd(
+        "Input.dispatchKeyEvent",
+        {
             "type": "keyDown",
-            "key": key_name,
-            "code": code,
-            "windowsVirtualKeyCode": vk,
-            "nativeVirtualKeyCode": vk,
-        }
-        if text:
-            payload["text"] = text
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", payload)
-
-        payload["type"] = "keyUp"
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", payload)
+            "key": "Enter",
+            "code": "Enter",
+            "windowsVirtualKeyCode": 13,
+            "nativeVirtualKeyCode": 13,
+            "text": "\r",
+        },
+    )
+    driver.execute_cdp_cmd(
+        "Input.dispatchKeyEvent",
+        {
+            "type": "keyUp",
+            "key": "Enter",
+            "code": "Enter",
+            "windowsVirtualKeyCode": 13,
+            "nativeVirtualKeyCode": 13,
+        },
+    )
 
 
 # -------------------------------------------------------------------
-# Fast Engine Setup
+# Browser Setup
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_driver():
@@ -168,18 +247,17 @@ def sanitize_url(raw_url: str) -> str:
     return url
 
 
-def capture_compressed_viewport(driver) -> Image.Image:
+def capture_compressed_viewport_b64(driver) -> str:
     raw_png = driver.get_screenshot_as_png()
     img = Image.open(io.BytesIO(raw_png)).convert("RGB")
 
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=45, optimize=True)
-    buffer.seek(0)
-    return Image.open(buffer)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
 # -------------------------------------------------------------------
-# Session State Initialization
+# Session State
 # -------------------------------------------------------------------
 if "current_url" not in st.session_state:
     try:
@@ -187,12 +265,12 @@ if "current_url" not in st.session_state:
     except Exception:
         st.session_state.current_url = "https://www.google.com"
 
-if "last_click" not in st.session_state:
-    st.session_state.last_click = None
+if "last_event_ts" not in st.session_state:
+    st.session_state.last_event_ts = None
 
 
 # -------------------------------------------------------------------
-# Navigation Bar
+# Top Navigation Bar
 # -------------------------------------------------------------------
 nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
     [0.3, 0.3, 0.3, 0.3, 7.5, 0.6]
@@ -238,63 +316,26 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Hardware Typing Controls
+# Direct Interactive Viewport (Handles Clicks + Keyboard Input)
 # -------------------------------------------------------------------
-def handle_typing():
-    typed_text = st.session_state.get("type_input_value", "")
-    if typed_text:
-        # Step 1: Inject hardware characters via CDP
-        cdp_type_text(driver, typed_text)
-        # Step 2: Fire hardware Enter key
-        cdp_press_special(driver, "Enter")
+b64_image = capture_compressed_viewport_b64(driver)
 
-        st.session_state["type_input_value"] = ""
-        st.session_state.current_url = driver.current_url
+event = interactive_viewport(image=b64_image, key="direct_screen_viewport")
 
+if event and event.get("ts") != st.session_state.last_event_ts:
+    st.session_state.last_event_ts = event.get("ts")
+    event_type = event.get("type")
 
-t_col1, t_col2, t_col3 = st.columns([7, 1.5, 1.5])
-
-with t_col1:
-    st.text_input(
-        "Typing Bar",
-        key="type_input_value",
-        placeholder="1. Click text box in image below  →  2. Type text here  →  3. Press Enter...",
-        on_change=handle_typing,
-        label_visibility="collapsed",
-    )
-
-with t_col2:
-    if st.button("⌫ Backspace", use_container_width=True):
-        cdp_press_special(driver, "Backspace")
-        st.rerun()
-
-with t_col3:
-    if st.button("↵ Send Enter", use_container_width=True):
-        cdp_press_special(driver, "Enter")
+    if event_type == "click":
+        cdp_click(driver, event["x"], event["y"])
         st.session_state.current_url = driver.current_url
         st.rerun()
 
-
-# -------------------------------------------------------------------
-# Viewport Fragment (CDP Click Target)
-# -------------------------------------------------------------------
-@st.fragment
-def render_viewport():
-    img = capture_compressed_viewport(driver)
-
-    coords = streamlit_image_coordinates(
-        img,
-        key="full_screen_viewport",
-    )
-
-    if coords is not None and coords != st.session_state.last_click:
-        st.session_state.last_click = coords
-        x, y = coords["x"], coords["y"]
-
-        # Hardware-level mouse click directly at pixel coordinates
-        cdp_click(driver, x, y)
+    elif event_type == "type":
+        text_to_send = event.get("text", "")
+        if text_to_send:
+            cdp_type_text(driver, text_to_send)
+        if event.get("key") == "Enter":
+            cdp_press_enter(driver)
         st.session_state.current_url = driver.current_url
         st.rerun()
-
-
-render_viewport()
