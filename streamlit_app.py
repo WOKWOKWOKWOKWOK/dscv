@@ -13,17 +13,28 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 
 # -------------------------------------------------------------------
-# Page Config & Custom Styling
+# Page Config & Full-Width Full-Screen Styling
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
 st.markdown(
     """
 <style>
+    /* Remove default Streamlit padding to maximize browser area */
+    .block-container {
+        padding-top: 0.8rem !important;
+        padding-bottom: 0rem !important;
+        padding-left: 0.8rem !important;
+        padding-right: 0.8rem !important;
+        max-width: 100% !important;
+    }
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
     .stApp {
         background-color: #202124;
         color: #e8eaed;
     }
+    /* Chrome Dark Omnibox Styling */
     div[data-testid="stTextInput"] > div > div > input {
         background-color: #35363a !important;
         color: #ffffff !important;
@@ -53,7 +64,7 @@ st.markdown(
 def start_virtual_display():
     """Initializes Xvfb virtual framebuffer for headless execution."""
     try:
-        display = Display(visible=0, size=(1280, 720))
+        display = Display(visible=0, size=(1920, 1080))
         display.start()
         return display
     except Exception:
@@ -61,13 +72,13 @@ def start_virtual_display():
 
 
 def init_chrome_driver():
-    """Initializes Selenium Chrome WebDriver."""
+    """Initializes Selenium Chrome WebDriver at 1080p full resolution."""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,720")
+    options.add_argument("--window-size=1920,1080")
     options.add_argument(
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -115,11 +126,12 @@ if "last_click" not in st.session_state:
 
 driver = st.session_state.driver
 
+
 # -------------------------------------------------------------------
-# Top Navigation Bar (Chrome Omnibox)
+# Top Address Bar (Chrome Omnibox)
 # -------------------------------------------------------------------
 nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
-    [0.4, 0.4, 0.4, 0.4, 6.5, 0.8]
+    [0.3, 0.3, 0.3, 0.3, 7.5, 0.6]
 )
 
 with nav_back:
@@ -167,69 +179,67 @@ with nav_go:
 
 
 # -------------------------------------------------------------------
-# Main Viewport & Direct Keyboard Bar
+# Minimal Collapsible Keyboard & Scroll Bar
 # -------------------------------------------------------------------
-col_main, col_controls = st.columns([4, 1])
+with st.expander("⌨️ Keyboard & Scroll Tools (Click to open/close)"):
+    k_col1, k_col2, k_col3, k_col4 = st.columns([4, 1, 1, 1])
 
-with col_controls:
-    st.subheader("⌨️ Text Entry")
+    with k_col1:
+        typed_text = st.text_input(
+            "Type text into focused element:",
+            key="type_box",
+            placeholder="Click an element on the screen first, then type here...",
+            label_visibility="collapsed",
+        )
 
-    typed_text = st.text_input(
-        "Type into focused element:",
-        key="keyboard_input",
-        placeholder="Type text here...",
-    )
-
-    send_enter = st.checkbox("Send ENTER after typing", value=True)
-
-    if st.button("Send Keyboard Keys", use_container_width=True):
-        if typed_text:
-            active_el = driver.switch_to.active_element
-            active_el.send_keys(typed_text)
-            if send_enter:
+    with k_col2:
+        if st.button("Send Keys", use_container_width=True):
+            if typed_text:
+                active_el = driver.switch_to.active_element
+                active_el.send_keys(typed_text)
                 active_el.send_keys(Keys.ENTER)
-            time.sleep(1.5)
-            st.session_state.current_url = driver.current_url
-            st.rerun()
+                time.sleep(1.5)
+                st.session_state.current_url = driver.current_url
+                st.rerun()
 
-    st.divider()
-    st.subheader("📜 Scroll")
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        if st.button("⬆️ Up", use_container_width=True):
-            driver.execute_script("window.scrollBy(0, -400);")
-            time.sleep(0.5)
-            st.rerun()
-    with col_s2:
-        if st.button("⬇️ Down", use_container_width=True):
-            driver.execute_script("window.scrollBy(0, 400);")
+    with k_col3:
+        if st.button("⬆️ Scroll Up", use_container_width=True):
+            driver.execute_script("window.scrollBy(0, -500);")
             time.sleep(0.5)
             st.rerun()
 
-with col_main:
-    # Capture fresh viewport
-    img = capture_viewport(driver)
+    with k_col4:
+        if st.button("⬇️ Scroll Down", use_container_width=True):
+            driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(0.5)
+            st.rerun()
 
-    # Render clickable image viewport
-    coords = streamlit_image_coordinates(
-        img,
-        key="interactive_viewport",
-    )
 
-    # Process direct click on the webpage image
-    if coords is not None and coords != st.session_state.last_click:
-        st.session_state.last_click = coords
-        x, y = coords["x"], coords["y"]
+# -------------------------------------------------------------------
+# Full-Width Interactive Viewport
+# -------------------------------------------------------------------
+img = capture_viewport(driver)
 
-        # Inject real JavaScript click directly at touched coordinates
-        js_click_code = f"""
-        var elem = document.elementFromPoint({x}, {y});
-        if (elem) {{
-            elem.click();
-            elem.focus();
-        }}
-        """
-        driver.execute_script(js_click_code)
-        time.sleep(1.5)
-        st.session_state.current_url = driver.current_url
-        st.rerun()
+# Render full screen interactive screenshot
+coords = streamlit_image_coordinates(
+    img,
+    key="full_screen_viewport",
+)
+
+# Process direct clicks anywhere on the viewport image
+if coords is not None and coords != st.session_state.last_click:
+    st.session_state.last_click = coords
+    x, y = coords["x"], coords["y"]
+
+    # Inject click at direct pixel coordinates
+    js_click_code = f"""
+    var elem = document.elementFromPoint({x}, {y});
+    if (elem) {{
+        elem.click();
+        elem.focus();
+    }}
+    """
+    driver.execute_script(js_click_code)
+    time.sleep(1.5)
+    st.session_state.current_url = driver.current_url
+    st.rerun()
