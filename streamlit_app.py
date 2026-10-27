@@ -9,7 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 
 # -------------------------------------------------------------------
-# Page Config & Layout
+# Page Config & Custom Styling
 # -------------------------------------------------------------------
 st.set_page_config(page_title="Chrome Browser", page_icon="🌐", layout="wide")
 
@@ -17,7 +17,7 @@ st.markdown(
     """
 <style>
     .block-container {
-        padding: 0.5rem !important;
+        padding: 0.4rem !important;
         max-width: 100% !important;
     }
     header, footer {visibility: hidden;}
@@ -48,7 +48,7 @@ st.markdown(
 
 
 # -------------------------------------------------------------------
-# Driver Setup with Resource Caching
+# Ultra-Fast Driver Initialization with CDP Blocking
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_driver():
@@ -57,16 +57,22 @@ def get_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,720")
+    
+    # 1024x576 resolution significantly speeds up screenshot encoding vs 1280x720
+    options.add_argument("--window-size=1024,576")
 
-    # Performance & memory optimization flags
-    options.page_load_strategy = "eager"  # Does not wait for full page ads/trackers
+    # Aggressive execution and memory optimization flags
+    options.page_load_strategy = "eager"
     options.add_argument("--disable-extensions")
+    options.add_argument("--disable-component-update")
     options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-domain-reliability")
     options.add_argument("--disable-sync")
-    options.add_argument("--disable-translate")
+    options.add_argument("--metrics-recording-only")
     options.add_argument("--disable-default-apps")
-    options.add_argument("--disable-animations")
+    options.add_argument("--mute-audio")
+    options.add_argument("--no-first-run")
+    options.add_argument("--disable-notifications")
     options.add_argument(
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -78,7 +84,22 @@ def get_driver():
             break
 
     driver = webdriver.Chrome(options=options)
-    driver.implicitly_wait(1)
+    driver.implicitly_wait(0.2)
+
+    # CDP Network Interception: Blocks ads, webfonts, and heavy media streams from downloading
+    driver.execute_cdp_cmd("Network.enable", {})
+    driver.execute_cdp_cmd(
+        "Network.setBlockedURLs",
+        {
+            "urls": [
+                "*.woff2", "*.woff", "*.ttf",           # Custom fonts (huge latency bottleneck)
+                "*.mp4", "*.webm", "*.avi", "*.m3u8",   # Video streams
+                "*doubleclick.net*", "*google-analytics.com*", 
+                "*googlesyndication.com*", "*facebook.net*" # Trackers and ads
+            ]
+        },
+    )
+
     driver.get("https://www.google.com")
     return driver
 
@@ -96,11 +117,16 @@ def sanitize_url(raw_url: str) -> str:
     return url
 
 
-def capture_viewport_fast(driver) -> Image.Image:
-    """Fast direct image capture without redundant double-buffering."""
+def capture_compressed_viewport(driver) -> Image.Image:
+    """Captures viewport and compresses to low-quality JPEG to minimize WebSocket payload."""
     raw_png = driver.get_screenshot_as_png()
-    img = Image.open(io.BytesIO(raw_png))
-    return img.convert("RGB") if img.mode != "RGB" else img
+    img = Image.open(io.BytesIO(raw_png)).convert("RGB")
+
+    buffer = io.BytesIO()
+    # JPEG format at 45% quality reduces image payload size from ~1MB to ~50KB
+    img.save(buffer, format="JPEG", quality=45, optimize=True)
+    buffer.seek(0)
+    return Image.open(buffer)
 
 
 # -------------------------------------------------------------------
@@ -114,7 +140,7 @@ if "last_click" not in st.session_state:
 
 
 # -------------------------------------------------------------------
-# Top Navigation Bar
+# Navigation Bar
 # -------------------------------------------------------------------
 nav_back, nav_fwd, nav_ref, nav_home, nav_url, nav_go = st.columns(
     [0.3, 0.3, 0.3, 0.3, 7.5, 0.6]
@@ -194,26 +220,30 @@ with st.expander("⌨️ Keyboard & Scroll Tools"):
 
 
 # -------------------------------------------------------------------
-# Interactive Viewport
+# Isolated Viewport Fragment (Prevents full-page rerun overhead)
 # -------------------------------------------------------------------
-img = capture_viewport_fast(driver)
+@st.fragment
+def render_viewport():
+    img = capture_compressed_viewport(driver)
 
-coords = streamlit_image_coordinates(
-    img,
-    key="full_screen_viewport",
-)
+    coords = streamlit_image_coordinates(
+        img,
+        key="full_screen_viewport",
+    )
 
-if coords is not None and coords != st.session_state.last_click:
-    st.session_state.last_click = coords
-    x, y = coords["x"], coords["y"]
+    if coords is not None and coords != st.session_state.last_click:
+        st.session_state.last_click = coords
+        x, y = coords["x"], coords["y"]
 
-    js_click_code = f"""
-    var elem = document.elementFromPoint({x}, {y});
-    if (elem) {{
-        elem.click();
-        elem.focus();
-    }}
-    """
-    driver.execute_script(js_click_code)
-    st.session_state.current_url = driver.current_url
-    st.rerun()
+        js_click_code = f"""
+        var elem = document.elementFromPoint({x}, {y});
+        if (elem) {{
+            elem.click();
+            elem.focus();
+        }}
+        """
+        driver.execute_script(js_click_code)
+        st.session_state.current_url = driver.current_url
+        st.rerun()
+
+render_viewport()
